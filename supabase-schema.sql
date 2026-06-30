@@ -19,16 +19,26 @@ create table if not exists visits (
   twd numeric,
   inr numeric,
   factors text[],
-  others_text text,
+  factor_notes jsonb,
   admit_date date,
   admit_dx text,
   plan_action text,
   plan_days integer,
+  plan_load_mg numeric,
+  plan_sub_action text,
+  plan_sub_pct numeric,
   new_twd numeric,
   next_appt date,
   clinical_note text,
   created_at timestamptz default now()
 );
+
+-- If you already created this table with the older schema, run these to add the new columns:
+alter table visits add column if not exists factor_notes jsonb;
+alter table visits add column if not exists plan_load_mg numeric;
+alter table visits add column if not exists plan_sub_action text;
+alter table visits add column if not exists plan_sub_pct numeric;
+alter table visits drop column if exists others_text;
 
 create table if not exists dosing_rules (
   id integer primary key default 1,
@@ -39,17 +49,21 @@ insert into dosing_rules (id, rules) values (
   1,
   '{
     "below": [
-      {"maxDeficit": 0.3, "increasePct": 5, "note": "Mild sub-therapeutic INR."},
-      {"maxDeficit": 0.5, "increasePct": 10, "note": "Moderate sub-therapeutic INR; consider extra dose."},
-      {"maxDeficit": 999, "increasePct": 20, "note": "Markedly sub-therapeutic INR; consider loading dose and review compliance."}
+      {"maxDeficit": 0.5, "increasePct": 10, "note": "Increase weekly dose by 10%."},
+      {"maxDeficit": 999, "increasePct": 20, "note": "Give a stat dose (double the new daily dose), then increase weekly dose by 20%."}
     ],
     "above": [
-      {"maxExcess": 0.5, "reducePct": 10, "withholdDays": 0, "note": "Mildly supra-therapeutic INR."},
-      {"maxExcess": 1.0, "reducePct": 15, "withholdDays": 1, "note": "Moderately high INR; withhold one dose then reduce."},
-      {"maxExcess": 999, "reducePct": 20, "withholdDays": 2, "note": "Markedly high INR; withhold doses, monitor for bleeding, consider vitamin K per local protocol."}
+      {"maxExcess": 0.09, "reducePct": 0, "withholdDays": 0, "note": "No change. Within acceptable buffer above target."},
+      {"maxExcess": 0.59, "reducePct": 0, "withholdDays": 0, "note": "No change. Recheck INR in 1 week; if persistently elevated, decrease weekly dose by 5-10%."},
+      {"maxExcess": 1.09, "reducePct": 10, "withholdDays": 1, "note": "Omit 1 dose, then decrease weekly dose by 10%."},
+      {"maxExcess": 2.0, "reducePct": 10, "withholdDays": 2, "note": "Omit 2 doses, then decrease weekly dose by 10%."},
+      {"maxExcess": 999, "reducePct": 0, "withholdDays": 0, "note": "INR critically high — refer to doctor immediately. Do not adjust dose without medical review."}
     ]
   }'
 ) on conflict (id) do nothing;
+-- Note: this only inserts if no row exists yet, so it never overwrites rules you've already
+-- edited in the Dosing rules tab. To reset to these defaults on an existing database, run:
+-- delete from dosing_rules where id = 1; then re-run this INSERT block.
 
 -- Row Level Security: only signed-in users (added by you in the Supabase dashboard)
 -- can read or write data. There is no public sign-up in this app, so access is
