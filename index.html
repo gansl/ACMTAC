@@ -5,6 +5,7 @@
 <title>INR Clinic Tracker</title>
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 <style>
   :root{
     --ink:#16243C; --ink-soft:#3A4A63; --paper:#F6F4EE; --card:#FFFFFF; --line:#DCD7C9;
@@ -113,6 +114,11 @@
     </div>
     <input class="search" id="searchBox" placeholder="Search name or MRN" oninput="renderPatientList()">
     <button class="btn-add" onclick="openNewPatientModal()">+ Add patient</button>
+    <div style="display:flex; gap:6px; margin-bottom:16px;">
+      <button class="btn" style="flex:1; font-size:11.5px; padding:8px; background:#1E2E48; border-color:#2C3C57; color:#F1EEE5;" onclick="document.getElementById('csvFile').click()">Import CSV</button>
+      <button class="btn" style="flex:1; font-size:11.5px; padding:8px; background:#1E2E48; border-color:#2C3C57; color:#F1EEE5;" onclick="downloadCsvTemplate()">Template</button>
+    </div>
+    <input type="file" id="csvFile" accept=".csv" style="display:none" onchange="handleCsvImport(event)">
     <div class="patient-list" id="patientList"></div>
     <div class="logout-row">
       <span id="sessionEmail"></span>
@@ -156,14 +162,15 @@ const FACTOR_OPTIONS = [
 
 const DEFAULT_RULES = {
   below: [
-    {maxDeficit:0.3, increasePct:5, note:"Mild sub-therapeutic INR."},
-    {maxDeficit:0.5, increasePct:10, note:"Moderate sub-therapeutic INR; consider extra dose."},
-    {maxDeficit:999, increasePct:20, note:"Markedly sub-therapeutic INR; consider loading dose and review compliance."}
+    {maxDeficit:0.5, increasePct:10, note:"Increase weekly dose by 10%."},
+    {maxDeficit:999, increasePct:20, note:"Give a stat dose (double the new daily dose), then increase weekly dose by 20%."}
   ],
   above: [
-    {maxExcess:0.5, reducePct:10, withholdDays:0, note:"Mildly supra-therapeutic INR."},
-    {maxExcess:1.0, reducePct:15, withholdDays:1, note:"Moderately high INR; withhold one dose then reduce."},
-    {maxExcess:999, reducePct:20, withholdDays:2, note:"Markedly high INR; withhold doses, monitor for bleeding, consider vitamin K per local protocol."}
+    {maxExcess:0.09, reducePct:0, withholdDays:0, note:"No change. Within acceptable buffer above target."},
+    {maxExcess:0.59, reducePct:0, withholdDays:0, note:"No change. Recheck INR in 1 week; if persistently elevated, decrease weekly dose by 5-10%."},
+    {maxExcess:1.09, reducePct:10, withholdDays:1, note:"Omit 1 dose, then decrease weekly dose by 10%."},
+    {maxExcess:2.0, reducePct:10, withholdDays:2, note:"Omit 2 doses, then decrease weekly dose by 10%."},
+    {maxExcess:999, reducePct:0, withholdDays:0, note:"INR critically high — refer to doctor immediately. Do not adjust dose without medical review."}
   ]
 };
 
@@ -378,6 +385,66 @@ async function createPatient(){
   closeNewPatientModal();
   await renderPatientList();
   selectPatient(id);
+}
+
+function downloadCsvTemplate(){
+  const csv = "name,mrn,phone,indication,target_low,target_high,duration\n"+
+    "Tan Mei Ling,A1234567,0123456789,Atrial fibrillation,2,3,Lifelong\n"+
+    "Lim Wei Jie,B7654321,0198765432,DVT,2,3,6 months\n";
+  const blob = new Blob([csv], {type:"text/csv"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "patient_registry_template.csv"; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function getField(row, ...keys){
+  for(const k of keys){
+    for(const rk of Object.keys(row)){
+      if(rk.trim().toLowerCase() === k.toLowerCase()) return (row[rk]||"").toString().trim();
+    }
+  }
+  return "";
+}
+
+async function handleCsvImport(event){
+  const file = event.target.files[0];
+  if(!file) return;
+  if(!configOk){ alert("Connect Supabase first (see config.js) before importing patients."); event.target.value=""; return; }
+
+  Papa.parse(file, {
+    header: true,
+    skipEmptyLines: true,
+    complete: async (results) => {
+      let imported = 0, skipped = 0;
+      for(const row of results.data){
+        const name = getField(row, "name");
+        const mrn = getField(row, "mrn");
+        if(!name || !mrn){ skipped++; continue; }
+        const id = "p_"+Date.now()+"_"+Math.random().toString(36).slice(2,7);
+        const targetLow = parseFloat(getField(row,"target_low","targetLow","target low")) || 2;
+        const targetHigh = parseFloat(getField(row,"target_high","targetHigh","target high")) || 3;
+        const patient = {
+          id, name, mrn,
+          phone: getField(row,"phone"),
+          indication: getField(row,"indication"),
+          targetLow, targetHigh,
+          duration: getField(row,"duration")
+        };
+        patients.push(patient);
+        await upsertPatientRow(patient);
+        visitsCache[id] = [];
+        imported++;
+      }
+      event.target.value = "";
+      await renderPatientList();
+      alert("Imported "+imported+" patient(s)."+(skipped ? " Skipped "+skipped+" row(s) missing name or MRN." : ""));
+    },
+    error: (err) => {
+      event.target.value = "";
+      alert("Could not read that CSV file: "+err.message);
+    }
+  });
 }
 
 async function selectPatient(id){
@@ -621,26 +688,71 @@ function renderHistoryPanel(p, visits, ttr){
 }
 
 // ---------- Settings view ----------
+let rulesDraft = null;
+
 async function renderSettingsView(){
   const main = document.getElementById("main");
   if(!configOk){ main.innerHTML = configWarningHtml(); return; }
   const rules = await getRules();
+  rulesDraft = JSON.parse(JSON.stringify(rules));
 
   main.innerHTML =
     '<div class="patient-header"><div><h1>Dosing rules</h1><div class="meta">Used for the instant rule-based suggestion across all patients</div></div></div>'+
-    '<div class="card"><h3>Instant rule-based dosing thresholds</h3>'+
-      '<p class="hint" style="margin-bottom:10px;">These power the instant suggestion shown while entering a review. Edit as JSON to match your protocol: "below" tiers fire when INR is under target, "above" tiers when INR is over target, ordered from mildest to most severe deviation.</p>'+
-      '<textarea id="rules_json" rows="14" style="width:100%; font-family:var(--mono); font-size:12.5px;">'+escapeHtml(JSON.stringify(rules, null, 2))+'</textarea>'+
-      '<div class="row-actions"><button class="btn btn-primary" onclick="saveRulesClick()">Save rules</button></div>'+
-    '</div>';
+    '<div class="card"><h3>If INR is below target range</h3>'+
+      '<p class="hint" style="margin-bottom:12px;">Tiers are checked from smallest to largest deviation. "Up to" means: if the INR is this much or less below the target low, use this tier.</p>'+
+      '<div id="belowRows"></div>'+
+      '<button class="btn" onclick="addTier(\'below\')">+ Add tier</button>'+
+    '</div>'+
+    '<div class="card"><h3>If INR is above target range</h3>'+
+      '<p class="hint" style="margin-bottom:12px;">Same idea, for INR above the target high. You can also specify a withhold period before resuming at the reduced dose.</p>'+
+      '<div id="aboveRows"></div>'+
+      '<button class="btn" onclick="addTier(\'above\')">+ Add tier</button>'+
+    '</div>'+
+    '<div class="row-actions"><button class="btn btn-primary" onclick="saveRulesClick()">Save rules</button></div>';
+
+  renderTierRows();
+}
+
+function belowRowHtml(t,i){
+  return '<div class="grid" style="grid-template-columns:1.1fr 1.1fr 2fr auto; gap:10px; margin-bottom:10px; align-items:end;">'+
+    '<div class="field"><label>Up to (INR below target)</label><input type="number" step="0.1" value="'+t.maxDeficit+'" oninput="updateTier(\'below\','+i+',\'maxDeficit\',this.value)"></div>'+
+    '<div class="field"><label>Increase TWD by (%)</label><input type="number" step="1" value="'+t.increasePct+'" oninput="updateTier(\'below\','+i+',\'increasePct\',this.value)"></div>'+
+    '<div class="field"><label>Note shown to user</label><input value="'+escapeHtml(t.note||'')+'" oninput="updateTier(\'below\','+i+',\'note\',this.value)"></div>'+
+    '<button class="btn btn-danger" style="padding:9px 12px;" onclick="removeTier(\'below\','+i+')">Remove</button>'+
+  '</div>';
+}
+function aboveRowHtml(t,i){
+  return '<div class="grid" style="grid-template-columns:1fr 1fr 0.8fr 2fr auto; gap:10px; margin-bottom:10px; align-items:end;">'+
+    '<div class="field"><label>Up to (INR above target)</label><input type="number" step="0.1" value="'+t.maxExcess+'" oninput="updateTier(\'above\','+i+',\'maxExcess\',this.value)"></div>'+
+    '<div class="field"><label>Reduce TWD by (%)</label><input type="number" step="1" value="'+t.reducePct+'" oninput="updateTier(\'above\','+i+',\'reducePct\',this.value)"></div>'+
+    '<div class="field"><label>Withhold (days)</label><input type="number" step="1" value="'+(t.withholdDays||0)+'" oninput="updateTier(\'above\','+i+',\'withholdDays\',this.value)"></div>'+
+    '<div class="field"><label>Note shown to user</label><input value="'+escapeHtml(t.note||'')+'" oninput="updateTier(\'above\','+i+',\'note\',this.value)"></div>'+
+    '<button class="btn btn-danger" style="padding:9px 12px;" onclick="removeTier(\'above\','+i+')">Remove</button>'+
+  '</div>';
+}
+function renderTierRows(){
+  document.getElementById("belowRows").innerHTML = rulesDraft.below.map(belowRowHtml).join("") || '<div class="empty-state">No tiers yet — add one below.</div>';
+  document.getElementById("aboveRows").innerHTML = rulesDraft.above.map(aboveRowHtml).join("") || '<div class="empty-state">No tiers yet — add one below.</div>';
+}
+function updateTier(group, idx, key, value){
+  rulesDraft[group][idx][key] = (key === "note") ? value : parseFloat(value);
+}
+function addTier(group){
+  if(group === "below") rulesDraft.below.push({maxDeficit:1, increasePct:10, note:""});
+  else rulesDraft.above.push({maxExcess:1, reducePct:10, withholdDays:0, note:""});
+  renderTierRows();
+}
+function removeTier(group, idx){
+  rulesDraft[group].splice(idx,1);
+  renderTierRows();
 }
 
 async function saveRulesClick(){
-  let parsed;
-  try{ parsed = JSON.parse(document.getElementById("rules_json").value); }
-  catch(e){ alert("That's not valid JSON: "+e.message); return; }
-  await saveRulesRow(parsed);
-  rulesCache = parsed;
+  rulesDraft.below.sort((a,b) => a.maxDeficit - b.maxDeficit);
+  rulesDraft.above.sort((a,b) => a.maxExcess - b.maxExcess);
+  await saveRulesRow(rulesDraft);
+  rulesCache = rulesDraft;
+  renderTierRows();
   alert("Dosing rules saved.");
 }
 
