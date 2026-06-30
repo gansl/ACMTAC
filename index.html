@@ -69,6 +69,9 @@
   .field input:focus, .field select:focus, .field textarea:focus{outline:none; border-color:var(--accent);}
   .checklist{display:flex; flex-direction:column; gap:7px;}
   .checklist label{display:flex; align-items:center; gap:8px; font-size:13px; font-weight:400; color:var(--ink); cursor:pointer;}
+  .factor-row{padding:6px 0; border-bottom:1px solid #F0EEE4;}
+  .factor-row:last-child{border-bottom:none;}
+  .factor-note{padding:7px 9px; border-radius:6px; border:1px solid var(--line); font-size:12.5px; background:#FCFBF7; font-family:var(--sans);}
   .span2{grid-column:span 2;}
   .row-actions{display:flex; justify-content:flex-end; gap:10px; margin-top:8px;}
   .btn{padding:9px 18px; border-radius:7px; border:1px solid var(--line); background:#FCFBF7; font-size:13px; font-weight:600; cursor:pointer; color:var(--ink);}
@@ -119,6 +122,11 @@
       <button class="btn" style="flex:1; font-size:11.5px; padding:8px; background:#1E2E48; border-color:#2C3C57; color:#F1EEE5;" onclick="downloadCsvTemplate()">Template</button>
     </div>
     <input type="file" id="csvFile" accept=".csv" style="display:none" onchange="handleCsvImport(event)">
+    <div style="display:flex; gap:6px; margin-bottom:16px;">
+      <button class="btn" style="flex:1; font-size:11.5px; padding:8px; background:#1E2E48; border-color:#2C3C57; color:#F1EEE5;" onclick="exportData()">Export data</button>
+      <button class="btn" style="flex:1; font-size:11.5px; padding:8px; background:#1E2E48; border-color:#2C3C57; color:#F1EEE5;" onclick="document.getElementById('jsonFile').click()">Import data</button>
+    </div>
+    <input type="file" id="jsonFile" accept=".json" style="display:none" onchange="handleJsonImport(event)">
     <div class="patient-list" id="patientList"></div>
     <div class="logout-row">
       <span id="sessionEmail"></span>
@@ -155,6 +163,7 @@
 
 <script>
 const FACTOR_OPTIONS = [
+  "No significant factor detected",
   "Diet changes","Non-compliance to regime","Drug / supplement interaction",
   "Changes in medical condition","Changes in lifestyle (alcohol/smoking)",
   "Changes in physical activities","Others"
@@ -241,10 +250,10 @@ function patientToRow(p){
   return {id:p.id, name:p.name, mrn:p.mrn, phone:p.phone, indication:p.indication, target_low:p.targetLow, target_high:p.targetHigh, duration:p.duration};
 }
 function rowToVisit(r){
-  return {id:r.id, date:r.date, twd:r.twd, inr:r.inr, factors:r.factors||[], othersText:r.others_text||"", admitDate:r.admit_date||"", admitDx:r.admit_dx||"", planAction:r.plan_action, planDays:r.plan_days, newTwd:r.new_twd, nextAppt:r.next_appt||"", clinicalNote:r.clinical_note||""};
+  return {id:r.id, date:r.date, twd:r.twd, inr:r.inr, factors:r.factors||[], factorNotes:r.factor_notes||{}, admitDate:r.admit_date||"", admitDx:r.admit_dx||"", planAction:r.plan_action, planDays:r.plan_days, planLoadMg:r.plan_load_mg, planSubAction:r.plan_sub_action||"", planSubPct:r.plan_sub_pct, newTwd:r.new_twd, nextAppt:r.next_appt||"", clinicalNote:r.clinical_note||""};
 }
 function visitToRow(v, patientId){
-  return {id:v.id, patient_id:patientId, date:v.date||null, twd:v.twd||null, inr:v.inr||null, factors:v.factors||[], others_text:v.othersText||null, admit_date:v.admitDate||null, admit_dx:v.admitDx||null, plan_action:v.planAction||null, plan_days:v.planDays||null, new_twd:v.newTwd||null, next_appt:v.nextAppt||null, clinical_note:v.clinicalNote||null};
+  return {id:v.id, patient_id:patientId, date:v.date||null, twd:v.twd||null, inr:v.inr||null, factors:v.factors||[], factor_notes:v.factorNotes||{}, admit_date:v.admitDate||null, admit_dx:v.admitDx||null, plan_action:v.planAction||null, plan_days:v.planDays||null, plan_load_mg:v.planLoadMg||null, plan_sub_action:v.planSubAction||null, plan_sub_pct:v.planSubPct||null, new_twd:v.newTwd||null, next_appt:v.nextAppt||null, clinical_note:v.clinicalNote||null};
 }
 
 async function fetchPatients(){
@@ -267,6 +276,10 @@ async function fetchVisits(patientId){
 }
 async function insertVisitRow(patientId, visit){
   const {error} = await sb.from("visits").insert(visitToRow(visit, patientId));
+  if(error) console.error(error);
+}
+async function upsertVisitRow(patientId, visit){
+  const {error} = await sb.from("visits").upsert(visitToRow(visit, patientId));
   if(error) console.error(error);
 }
 async function fetchRules(){
@@ -316,19 +329,42 @@ function calcTTR(visits, low, high){
 }
 
 // ---------- Rule-based dosing suggestion ----------
-function getRuleSuggestion(inr, low, high, rules){
+// Rule 1: max change of daily dose is +/-1mg (i.e. max weekly TWD change of 7mg).
+// Rule 2: 1% change in warfarin dose corresponds to ~0.1 change in INR (used only as a sanity cross-check note).
+// Rule 3: withholding 1 day of warfarin is expected to drop INR by about 0.3-0.5.
+function suggestNewTwd(currentTwd, pct, direction){
+  const twd = parseFloat(currentTwd);
+  if(isNaN(twd) || twd <= 0 || !pct) return null;
+  const maxWeeklyChange = 7; // Rule 1: +/-1mg/day cap
+  let change = twd * (pct/100);
+  const capped = change > maxWeeklyChange;
+  if(capped) change = maxWeeklyChange;
+  const newTwd = Math.round((twd + direction*change) * 10) / 10;
+  return {newTwd, capped};
+}
+
+function getRuleSuggestion(inr, low, high, rules, currentTwd){
   if(isNaN(inr)) return null;
   if(inr >= low && inr <= high) return {text:"INR is within target range. Continue current dose.", tone:"good"};
+
   if(inr < low){
     const deficit = low - inr;
     const tier = rules.below.find(t => deficit <= t.maxDeficit) || rules.below[rules.below.length-1];
-    return {text:`Increase total weekly dose by approximately ${tier.increasePct}%. ${tier.note}`, tone:"warn"};
+    let text = `Increase total weekly dose by approximately ${tier.increasePct}%. ${tier.note}`;
+    const sug = suggestNewTwd(currentTwd, tier.increasePct, 1);
+    if(sug) text += ` Suggested new TWD: ~${sug.newTwd}mg/week${sug.capped ? " (capped at the ±1mg/day maximum daily change)" : ""}.`;
+    return {text, tone:"warn"};
   }
+
   const excess = inr - high;
   const tier = rules.above.find(t => excess <= t.maxExcess) || rules.above[rules.above.length-1];
-  let text = `Reduce total weekly dose by approximately ${tier.reducePct}%.`;
-  if(tier.withholdDays) text += ` Withhold dose for ${tier.withholdDays} day(s) first.`;
+  let text = tier.reducePct ? `Reduce total weekly dose by approximately ${tier.reducePct}%.` : "No dose reduction at this level.";
+  if(tier.withholdDays) text += ` Withhold dose for ${tier.withholdDays} day(s) first (each day withheld is expected to lower INR by roughly 0.3-0.5).`;
   text += ` ${tier.note}`;
+  if(tier.reducePct){
+    const sug = suggestNewTwd(currentTwd, tier.reducePct, -1);
+    if(sug) text += ` Suggested new TWD: ~${sug.newTwd}mg/week${sug.capped ? " (capped at the ±1mg/day maximum daily change)" : ""}.`;
+  }
   return {text, tone:"warn"};
 }
 
@@ -385,6 +421,60 @@ async function createPatient(){
   closeNewPatientModal();
   await renderPatientList();
   selectPatient(id);
+}
+
+async function exportData(){
+  if(!configOk){ alert("Connect Supabase first."); return; }
+  const allPatients = await fetchPatients();
+  const visitsByPatient = {};
+  for(const p of allPatients){
+    visitsByPatient[p.id] = await fetchVisits(p.id);
+  }
+  const rules = await getRules();
+  const payload = {exportedAt: new Date().toISOString(), patients: allPatients, visitsByPatient, dosingRules: rules};
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {type:"application/json"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "inr-clinic-backup-"+new Date().toISOString().slice(0,10)+".json"; a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function handleJsonImport(event){
+  const file = event.target.files[0];
+  if(!file) return;
+  if(!configOk){ alert("Connect Supabase first."); event.target.value=""; return; }
+  if(!confirm("This will add or update patients and reviews from the backup file into the current database. Continue?")){ event.target.value=""; return; }
+
+  try{
+    const text = await file.text();
+    const payload = JSON.parse(text);
+    let patientsCount = 0, visitsCount = 0;
+
+    for(const p of (payload.patients||[])){
+      await upsertPatientRow(p);
+      patientsCount++;
+    }
+    for(const pid of Object.keys(payload.visitsByPatient || {})){
+      for(const v of payload.visitsByPatient[pid]){
+        await upsertVisitRow(pid, v);
+        visitsCount++;
+      }
+    }
+    if(payload.dosingRules){
+      await saveRulesRow(payload.dosingRules);
+      rulesCache = payload.dosingRules;
+    }
+
+    visitsCache = {};
+    patients = await fetchPatients();
+    event.target.value = "";
+    await renderPatientList();
+    await renderMain();
+    alert("Import complete: "+patientsCount+" patient(s), "+visitsCount+" review(s) restored.");
+  }catch(e){
+    event.target.value = "";
+    alert("Could not read that backup file: "+e.message);
+  }
 }
 
 function downloadCsvTemplate(){
@@ -554,80 +644,133 @@ async function deletePatient(){
 // ---------- Review panel ----------
 async function renderReviewPanel(p){
   const el = document.getElementById("panelReview");
-  const factorChecks = FACTOR_OPTIONS.map(f => '<label><input type="checkbox" class="factor-check" value="'+escapeHtml(f)+'"> '+f+'</label>').join("");
+  const factorChecks = FACTOR_OPTIONS.map((f,idx) =>
+    '<div class="factor-row">'+
+      '<label><input type="checkbox" class="factor-check" data-idx="'+idx+'" value="'+escapeHtml(f)+'" onchange="onFactorToggle('+idx+')"> '+f+'</label>'+
+      '<input type="text" class="factor-note" id="factor_note_'+idx+'" placeholder="Notes for this factor (optional)" style="display:none; margin-top:5px; width:100%;">'+
+    '</div>'
+  ).join("");
 
   el.innerHTML =
     '<div class="card"><h3>Review details</h3>'+
       '<div class="grid3" style="margin-bottom:14px;">'+
         '<div class="field"><label>Review date</label><input id="rv_date" type="date"></div>'+
-        '<div class="field"><label>Current TWD (mg/week)</label><input id="rv_twd" type="number" step="0.5"></div>'+
+        '<div class="field"><label>Current TWD (mg/week)</label><input id="rv_twd" type="number" step="0.5" onchange="onInrChange()"></div>'+
         '<div class="field"><label>INR result</label><input id="rv_inr" type="number" step="0.1" onchange="onInrChange()"></div>'+
       '</div>'+
       '<div class="field" style="margin-bottom:6px;"><label>Factors if INR not in range (select all that apply)</label></div>'+
       '<div class="checklist">'+factorChecks+'</div>'+
-      '<div class="field span2" id="rv_others_wrap" style="display:none; margin-top:10px;"><label>Other factor (describe)</label><input id="rv_others_text" placeholder="Describe other factor"></div>'+
       '<div id="ruleSuggestionBox"></div>'+
     '</div>'+
     '<div class="card"><h3>Ward admission record (optional)</h3><div class="grid">'+
       '<div class="field"><label>Admission date</label><input id="rv_admit_date" type="date"></div>'+
       '<div class="field"><label>Diagnosis</label><input id="rv_admit_dx" placeholder="e.g. GI bleed"></div>'+
     '</div></div>'+
-    '<div class="card"><h3>Plan</h3><div class="grid">'+
-      '<div class="field"><label>Action</label><select id="rv_plan_action" onchange="onPlanChange()">'+
-        '<option value="continue">Continue dose</option><option value="withhold">Withhold dose</option>'+
-        '<option value="load">Load dose</option><option value="increase">Increase dose</option>'+
-        '<option value="reduce">Reduce dose</option></select></div>'+
-      '<div class="field" id="rv_plan_days_wrap" style="display:none;"><label id="rv_plan_days_label">For how many days</label><input id="rv_plan_days" type="number" min="1"></div>'+
-    '</div><div class="grid" style="margin-top:14px;">'+
-      '<div class="field"><label>New TWD (mg/week)</label><input id="rv_new_twd" type="number" step="0.5"></div>'+
-      '<div class="field"><label>Next appointment</label><input id="rv_next_appt" type="date"></div>'+
-    '</div><div class="row-actions"><button class="btn btn-primary" onclick="saveReview()">Save review</button></div></div>';
-
-  document.querySelectorAll(".factor-check").forEach(cb => {
-    cb.addEventListener("change", () => {
-      const othersChecked = [...document.querySelectorAll(".factor-check")].some(c => c.checked && c.value==="Others");
-      document.getElementById("rv_others_wrap").style.display = othersChecked ? "block" : "none";
-    });
-  });
+    '<div class="card"><h3>Plan</h3>'+
+      '<div class="field" style="margin-bottom:14px;"><label>Action</label>'+
+        '<select id="rv_plan_action" onchange="onPlanChange()">'+
+          '<option value="continue">Continue dose</option>'+
+          '<option value="load">Load dose</option>'+
+          '<option value="withhold">Withhold dose</option>'+
+          '<option value="refer_mopd">Refer MOPD</option>'+
+        '</select>'+
+      '</div>'+
+      '<div id="rv_load_wrap" style="display:none;">'+
+        '<div class="grid3" style="margin-bottom:10px;">'+
+          '<div class="field"><label>Load dose (mg)</label><input id="rv_load_mg" type="number" step="0.5"></div>'+
+          '<div class="field"><label>For how many days</label><input id="rv_load_days" type="number" min="1"></div>'+
+          '<div class="field"><label>Then</label><select id="rv_load_then" onchange="onSubActionChange()">'+
+            '<option value="continue">Continue dose</option>'+
+            '<option value="increase">Increase TWD by %</option>'+
+          '</select></div>'+
+        '</div>'+
+        '<div class="field" id="rv_load_pct_wrap" style="display:none; margin-bottom:6px; max-width:240px;"><label>Increase TWD by (%)</label><input id="rv_load_pct" type="number" step="1"></div>'+
+      '</div>'+
+      '<div id="rv_withhold_wrap" style="display:none;">'+
+        '<div class="grid3" style="margin-bottom:10px;">'+
+          '<div class="field"><label>Withhold for how many days</label><input id="rv_withhold_days" type="number" min="1"></div>'+
+          '<div class="field"><label>Then</label><select id="rv_withhold_then" onchange="onSubActionChange()">'+
+            '<option value="continue">Continue dose</option>'+
+            '<option value="reduce">Reduce TWD by %</option>'+
+          '</select></div>'+
+          '<div></div>'+
+        '</div>'+
+        '<div class="field" id="rv_withhold_pct_wrap" style="display:none; margin-bottom:6px; max-width:240px;"><label>Reduce TWD by (%)</label><input id="rv_withhold_pct" type="number" step="1"></div>'+
+      '</div>'+
+      '<div class="grid" style="margin-top:8px;">'+
+        '<div class="field"><label>New TWD (mg/week)</label><input id="rv_new_twd" type="number" step="0.5"></div>'+
+        '<div class="field"><label>Next appointment</label><input id="rv_next_appt" type="date"></div>'+
+      '</div>'+
+      '<div class="row-actions"><button class="btn btn-primary" onclick="saveReview()">Save review</button></div>'+
+    '</div>';
 
   onInrChange(p);
+}
+
+function onFactorToggle(idx){
+  const cb = document.querySelector('.factor-check[data-idx="'+idx+'"]');
+  document.getElementById("factor_note_"+idx).style.display = cb.checked ? "block" : "none";
 }
 
 async function onInrChange(pArg){
   const p = pArg || patients.find(x => x.id === currentPatientId);
   const inrVal = parseFloat(document.getElementById("rv_inr").value);
+  const twdVal = document.getElementById("rv_twd").value;
   const box = document.getElementById("ruleSuggestionBox");
   if(isNaN(inrVal)){ box.innerHTML = ""; return; }
   const rules = await getRules();
-  const sug = getRuleSuggestion(inrVal, parseFloat(p.targetLow), parseFloat(p.targetHigh), rules);
+  const sug = getRuleSuggestion(inrVal, parseFloat(p.targetLow), parseFloat(p.targetHigh), rules, twdVal);
   box.innerHTML = sug ? '<div class="suggestion-box"><b>Rule-based suggestion:</b> '+escapeHtml(sug.text)+'</div>' : "";
 }
 
 function onPlanChange(){
   const action = document.getElementById("rv_plan_action").value;
-  const wrap = document.getElementById("rv_plan_days_wrap");
-  const label = document.getElementById("rv_plan_days_label");
-  if(action==="withhold"){ wrap.style.display="block"; label.innerText="Withhold for how many days"; }
-  else if(action==="load"){ wrap.style.display="block"; label.innerText="Load dose for how many days"; }
-  else wrap.style.display="none";
+  document.getElementById("rv_load_wrap").style.display = action==="load" ? "block" : "none";
+  document.getElementById("rv_withhold_wrap").style.display = action==="withhold" ? "block" : "none";
+}
+function onSubActionChange(){
+  const loadThen = document.getElementById("rv_load_then").value;
+  document.getElementById("rv_load_pct_wrap").style.display = loadThen==="increase" ? "block" : "none";
+  const withholdThen = document.getElementById("rv_withhold_then").value;
+  document.getElementById("rv_withhold_pct_wrap").style.display = withholdThen==="reduce" ? "block" : "none";
 }
 
 async function saveReview(){
   const date = document.getElementById("rv_date").value;
   if(!date){ alert("Enter a review date."); return; }
-  const factors = [...document.querySelectorAll(".factor-check")].filter(c=>c.checked).map(c=>c.value);
-  const othersText = document.getElementById("rv_others_text").value.trim();
+
+  const factors = [];
+  const factorNotes = {};
+  document.querySelectorAll(".factor-check").forEach(cb => {
+    if(cb.checked){
+      factors.push(cb.value);
+      const noteEl = document.getElementById("factor_note_"+cb.dataset.idx);
+      if(noteEl && noteEl.value.trim()) factorNotes[cb.value] = noteEl.value.trim();
+    }
+  });
+
   const ruleBox = document.querySelector("#ruleSuggestionBox .suggestion-box");
+  const planAction = document.getElementById("rv_plan_action").value;
+  let planDays = "", planLoadMg = "", planSubAction = "", planSubPct = "";
+  if(planAction === "load"){
+    planLoadMg = document.getElementById("rv_load_mg").value;
+    planDays = document.getElementById("rv_load_days").value;
+    planSubAction = document.getElementById("rv_load_then").value;
+    planSubPct = planSubAction === "increase" ? document.getElementById("rv_load_pct").value : "";
+  } else if(planAction === "withhold"){
+    planDays = document.getElementById("rv_withhold_days").value;
+    planSubAction = document.getElementById("rv_withhold_then").value;
+    planSubPct = planSubAction === "reduce" ? document.getElementById("rv_withhold_pct").value : "";
+  }
 
   const visit = {
     id:"v_"+Date.now(), date,
     twd: document.getElementById("rv_twd").value,
     inr: document.getElementById("rv_inr").value,
-    factors, othersText,
+    factors, factorNotes,
     admitDate: document.getElementById("rv_admit_date").value,
     admitDx: document.getElementById("rv_admit_dx").value.trim(),
-    planAction: document.getElementById("rv_plan_action").value,
-    planDays: document.getElementById("rv_plan_days").value,
+    planAction, planDays, planLoadMg, planSubAction, planSubPct,
     newTwd: document.getElementById("rv_new_twd").value,
     nextAppt: document.getElementById("rv_next_appt").value,
     clinicalNote: ruleBox ? ruleBox.innerText.replace("Rule-based suggestion: ","") : ""
@@ -644,10 +787,17 @@ async function saveReview(){
 
 // ---------- History panel ----------
 function planLabel(v){
-  const map = {continue:"Continue dose", withhold:"Withhold dose", load:"Load dose", increase:"Increase dose", reduce:"Reduce dose"};
-  let s = map[v.planAction] || v.planAction;
-  if((v.planAction==="withhold"||v.planAction==="load") && v.planDays) s += " ("+v.planDays+"d)";
-  return s;
+  if(v.planAction === "continue") return "Continue dose";
+  if(v.planAction === "refer_mopd") return "Refer MOPD";
+  if(v.planAction === "load"){
+    const then = v.planSubAction === "increase" ? `then increase TWD by ${v.planSubPct||"?"}%` : "then continue dose";
+    return `Load dose ${v.planLoadMg||"?"}mg for ${v.planDays||"?"}d, ${then}`;
+  }
+  if(v.planAction === "withhold"){
+    const then = v.planSubAction === "reduce" ? `then reduce TWD by ${v.planSubPct||"?"}%` : "then continue dose";
+    return `Withhold ${v.planDays||"?"}d, ${then}`;
+  }
+  return v.planAction || "--";
 }
 function renderHistoryPanel(p, visits, ttr){
   const el = document.getElementById("panelHistory");
@@ -671,7 +821,10 @@ function renderHistoryPanel(p, visits, ttr){
       const inrNum = parseFloat(v.inr);
       const low = parseFloat(p.targetLow), high = parseFloat(p.targetHigh);
       const inRange = !isNaN(inrNum) && inrNum>=low && inrNum<=high;
-      const factorsHtml = (v.factors||[]).map(f => '<span class="tag">'+escapeHtml(f==="Others"&&v.othersText?v.othersText:f)+'</span>').join("");
+      const factorsHtml = (v.factors||[]).map(f => {
+        const note = (v.factorNotes||{})[f];
+        return '<span class="tag" title="'+escapeHtml(note||'')+'">'+escapeHtml(f)+(note?' — '+escapeHtml(note):'')+'</span>';
+      }).join("");
       const admitHtml = v.admitDate ? (escapeHtml(v.admitDate)+(v.admitDx?' &mdash; '+escapeHtml(v.admitDx):'')) : '<span style="color:var(--ink-soft);">&mdash;</span>';
       rows += '<tr>'+
         '<td>'+escapeHtml(v.date)+'</td>'+
