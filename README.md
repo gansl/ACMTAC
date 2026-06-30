@@ -56,11 +56,21 @@ git push -u origin main
 
 Future edits: push to GitHub again and Vercel redeploys automatically.
 
-## 6. Using it
+## 6. If you already deployed this app before
+
+Re-run `supabase-schema.sql` in the Supabase SQL editor — it's safe to run again, and will add the new columns (factor notes, load dose, sub-action fields) to your existing `visits` table without losing data. It will *not* overwrite dosing rules you've already saved; if you want to reset to the latest built-in defaults (based on the HQE2 protocol), run `delete from dosing_rules where id = 1;` first, then re-run the schema file — or simply edit the tiers directly in the Dosing rules tab.
+
+## 7. Using it
 
 - Open the site → you'll land on a sign-in screen. Log in with the email/password your administrator created for you in Supabase.
-- **Patients tab**: add patients, log reviews, see history and automatic TTR (Rosendaal method), with a banner and red badge whenever a patient's TTR drops below 60%.
-- **Dosing rules tab**: edit the JSON thresholds that drive the instant suggestion shown the moment you enter an INR value during a review (e.g. "if INR is 0.3–0.5 below target, increase TWD by 10%"). No AI, no external calls, no cost — pure local logic against rules you control.
+- **Patients tab**: add patients one by one, or click **Import CSV** in the sidebar to bulk-upload a patient registry. Click **Template** first to download a CSV with the expected columns (`name, mrn, phone, indication, target_low, target_high, duration`) and an example row — fill it in (e.g. from Excel, save as CSV) and import it. Rows missing a name or MRN are skipped and you'll see a summary of how many were imported.
+- Reviews, history, and automatic TTR (Rosendaal method) work the same as before, with a banner and red badge whenever a patient's TTR drops below 60%.
+- **Factors**: pick "No significant factor detected" when nothing relevant applies, or any combination of the listed factors. Each checked factor reveals its own small notes box so you can record specifics (e.g. "missed 2 doses while traveling") per factor, not just one shared free-text field.
+- **Plan**: choose Continue dose, Load dose, Withhold dose, or Refer MOPD.
+  - *Load dose*: enter the load dose in mg and how many days, then choose what happens after — continue dose, or increase TWD by a %.
+  - *Withhold dose*: enter how many days to withhold, then choose what happens after — continue dose, or reduce TWD by a %.
+- **Dosing rules tab**: set up your dose-adjustment thresholds without touching code. There are two tables — "If INR is below target range" and "If INR is above target range." Each row (tier) says: up to how far the INR deviates, what % to change the total weekly dose by, and (for high INR) how many days to withhold first. Click **+ Add tier** to add a row, **Remove** to delete one, and **Save rules** when done. Tiers are automatically sorted from mildest to most severe deviation, and the first tier wide enough to cover the actual deviation is the one used. The app also applies a ±1mg/day maximum daily-dose-change cap automatically and shows a suggested new TWD figure in mg, not just a percentage. These thresholds immediately drive the suggestion shown the moment you type an INR value on the review screen — no AI, no external calls, no cost.
+- **Export data / Import data** (sidebar): **Export data** downloads a single JSON file containing every patient, every review, and your current dosing rules — a full backup. **Import data** lets you pick a previously exported JSON file and restores it back into the database (adds new records, updates existing ones by ID, so re-importing the same file is safe). Use this to move data between two separate Supabase projects, or to keep periodic backups.
 - **Sign out** is in the bottom-left of the sidebar.
 
 ## Notes
