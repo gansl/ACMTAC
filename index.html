@@ -1085,75 +1085,124 @@ async function toggleTTRExclude(patientId){
 // ---------- Defaulter detection ----------
 function getDefaulters(allPatients, visitsCache){
   const today = new Date(); today.setHours(0,0,0,0);
-  const defaulters = [];
+  const overdue = [];       // last appt date has passed
+  const missingAppt = [];   // last visit has no next appointment set (incl. referrals)
+
   for(const p of allPatients){
     if(p.isActive === false) continue;
     const visits = (visitsCache[p.id]||[]).filter(v=>v.date);
     if(!visits.length) continue;
     const sorted = [...visits].sort((a,b)=>new Date(b.date)-new Date(a.date));
     const last = sorted[0];
-    if(!last.nextAppt) continue;
-    const apptDate = new Date(last.nextAppt); apptDate.setHours(0,0,0,0);
-    if(apptDate >= today) continue;
-    const daysOverdue = Math.floor((today - apptDate)/86400000);
-    defaulters.push({patient:p, missedDate:last.nextAppt, daysOverdue, lastVisitDate:last.date, lastINR:last.inr});
+
+    if(!last.nextAppt){
+      // No next appointment recorded — capture these (especially referrals)
+      missingAppt.push({
+        patient:p,
+        lastVisitDate:last.date,
+        lastINR:last.inr,
+        planAction:last.planAction,
+        isReferral: last.planAction === "refer_mopd"
+      });
+    } else {
+      const apptDate = new Date(last.nextAppt); apptDate.setHours(0,0,0,0);
+      if(apptDate >= today) continue;
+      const daysOverdue = Math.floor((today - apptDate)/86400000);
+      overdue.push({patient:p, missedDate:last.nextAppt, daysOverdue, lastVisitDate:last.date, lastINR:last.inr, planAction:last.planAction});
+    }
   }
-  return defaulters.sort((a,b)=>b.daysOverdue-a.daysOverdue);
+
+  overdue.sort((a,b)=>b.daysOverdue-a.daysOverdue);
+  // Referrals first in missingAppt list
+  missingAppt.sort((a,b)=>(b.isReferral?1:0)-(a.isReferral?1:0));
+  return {overdue, missingAppt};
 }
 
 async function renderDefaultersView(){
   const main = document.getElementById("main");
   if(!configOk){ main.innerHTML = configWarningHtml(); return; }
 
-  // Ensure all visits are loaded
   for(const p of patients){
     if(!visitsCache[p.id]) await loadVisits(p.id);
   }
 
-  const defaulters = getDefaulters(patients, visitsCache);
+  const {overdue, missingAppt} = getDefaulters(patients, visitsCache);
   const actions = await fetchDefaulterActions();
+
+  const PLAN_LABELS = {continue:"Continue dose", load:"Load dose", withhold:"Withhold dose", refer_mopd:"Refer MOPD"};
 
   function overdueBadge(days){
     const cls = days>30?'overdue-hi':(days>14?'overdue-mid':'overdue-lo');
     return `<span class="overdue-badge ${cls}">${days}d overdue</span>`;
   }
 
-  const ACTION_OPTIONS = ["","Attempted contact — no answer","Contacted — rescheduled","Contacted — declined follow-up","Contacted — reviewed elsewhere","Lost to follow-up","Deceased","Transferred to another clinic"];
+  const ACTION_OPTIONS = [
+    "","Attempted contact — no answer","Contacted — rescheduled",
+    "Contacted — declined follow-up","Contacted — reviewed elsewhere",
+    "Lost to follow-up","Deceased","Transferred to another clinic"
+  ];
 
-  let rows = "";
-  if(!defaulters.length){
-    rows = '<div class="empty-state">No defaulters detected. All active patients with recorded next-appointment dates have attended on time.</div>';
-  } else {
-    rows = defaulters.map(d => {
-      const key = d.patient.id+"_"+d.missedDate;
-      const existing = actions[key]||{};
-      const actionOpts = ACTION_OPTIONS.map(o=>`<option value="${escapeHtml(o)}" ${(existing.action||'')==o?'selected':''}>${o||'— Select action —'}</option>`).join('');
-      return `<div class="defaulter-row">
-        <div>
-          <div style="font-weight:600; font-size:13.5px; cursor:pointer; color:var(--accent);" onclick="selectPatient('${d.patient.id}')">${escapeHtml(d.patient.name)}</div>
-          <div style="font-size:11.5px; color:var(--ink-soft); font-family:var(--mono);">${escapeHtml(d.patient.mrn)}${d.patient.indication?' · '+escapeHtml(d.patient.indication):''}</div>
-          <div style="font-size:11.5px; margin-top:3px;">Last visit: ${escapeHtml(d.lastVisitDate||'—')} · Last INR: <b>${escapeHtml(String(d.lastINR||'—'))}</b></div>
-          <div style="font-size:11.5px;">Missed appt: ${escapeHtml(d.missedDate)} ${overdueBadge(d.daysOverdue)}</div>
-        </div>
-        <div><select id="da_action_${escapeHtml(key)}" style="width:100%; padding:7px 8px; border-radius:7px; border:1px solid var(--line); font-size:12.5px; background:#FCFBF7;">${actionOpts}</select></div>
-        <div><input id="da_notes_${escapeHtml(key)}" placeholder="Notes (optional)" value="${escapeHtml(existing.notes||'')}" style="width:100%; padding:7px 8px; border-radius:7px; border:1px solid var(--line); font-size:12.5px;"></div>
-        <div style="display:flex; flex-direction:column; gap:6px;">
-          <button class="btn btn-primary" style="padding:7px 14px; font-size:12px;" onclick="saveDAction('${escapeHtml(d.patient.id)}','${escapeHtml(d.missedDate)}','${escapeHtml(key)}')">Save</button>
-          ${existing.resolved?'<span class="status-badge sb-active" style="text-align:center;">Resolved</span>':'<button class="btn" style="padding:6px 14px; font-size:12px;" onclick="resolveDAction(\''+escapeHtml(d.patient.id)+'\',\''+escapeHtml(d.missedDate)+'\',\''+escapeHtml(key)+'\')">Resolve</button>'}
-        </div>
-      </div>`;
-    }).join('');
+  function actionRow(d, key, extraBadge){
+    const existing = actions[key]||{};
+    const opts = ACTION_OPTIONS.map(o=>`<option value="${escapeHtml(o)}" ${(existing.action||'')==o?'selected':''}>${o||'— Select action —'}</option>`).join('');
+    return `<div class="defaulter-row">
+      <div>
+        <div style="font-weight:600; font-size:13.5px; cursor:pointer; color:var(--accent);" onclick="selectPatient('${d.patient.id}')">${escapeHtml(d.patient.name)}</div>
+        <div style="font-size:11.5px; color:var(--ink-soft); font-family:var(--mono);">${escapeHtml(d.patient.mrn)}${d.patient.indication?' · '+escapeHtml(d.patient.indication):''}</div>
+        <div style="font-size:11.5px; margin-top:3px;">Last visit: <b>${escapeHtml(d.lastVisitDate||'—')}</b> · Last INR: <b>${escapeHtml(String(d.lastINR||'—'))}</b></div>
+        <div style="font-size:11.5px; margin-top:2px;">${extraBadge}</div>
+      </div>
+      <div><select id="da_action_${escapeHtml(key)}" style="width:100%; padding:7px 8px; border-radius:7px; border:1px solid var(--line); font-size:12.5px; background:#FCFBF7;">${opts}</select></div>
+      <div><input id="da_notes_${escapeHtml(key)}" placeholder="Notes (optional)" value="${escapeHtml(existing.notes||'')}" style="width:100%; padding:7px 8px; border-radius:7px; border:1px solid var(--line); font-size:12.5px;"></div>
+      <div style="display:flex; flex-direction:column; gap:6px;">
+        <button class="btn btn-primary" style="padding:7px 14px; font-size:12px;" onclick="saveDAction('${escapeHtml(d.patient.id)}','${escapeHtml(d.missedDate||d.lastVisitDate)}','${escapeHtml(key)}')">Save</button>
+        ${existing.resolved?'<span class="status-badge sb-active" style="text-align:center;">Resolved</span>':'<button class="btn" style="padding:6px 14px; font-size:12px;" onclick="resolveDAction(\''+escapeHtml(d.patient.id)+'\',\''+escapeHtml(d.missedDate||d.lastVisitDate)+'\',\''+escapeHtml(key)+'\')">Resolve</button>'}
+      </div>
+    </div>`;
   }
 
+  const colHeaders = `<div style="display:grid; grid-template-columns:1.6fr 1.2fr 1.2fr 0.5fr; gap:10px; padding:0 0 8px; font-size:10.5px; text-transform:uppercase; letter-spacing:0.5px; color:var(--ink-soft);">
+    <div>Patient</div><div>Action taken</div><div>Notes</div><div></div></div>`;
+
+  // Overdue section
+  const overdueRows = overdue.length === 0
+    ? '<div class="empty-state">No overdue appointments.</div>'
+    : colHeaders + overdue.map(d => {
+        const key = d.patient.id+"_"+(d.missedDate||d.lastVisitDate);
+        const badge = `Missed appt: ${escapeHtml(d.missedDate)} ${overdueBadge(d.daysOverdue)}`;
+        return actionRow(d, key, badge);
+      }).join('');
+
+  // Missing appointment section
+  const missingRows = missingAppt.length === 0
+    ? '<div class="empty-state">No patients with missing next appointment dates.</div>'
+    : colHeaders + missingAppt.map(d => {
+        const key = d.patient.id+"_noAppt_"+d.lastVisitDate;
+        const planLabel = PLAN_LABELS[d.planAction]||d.planAction||'—';
+        const badge = (d.isReferral
+          ? `<span class="overdue-badge overdue-hi">Refer MOPD</span>`
+          : `<span class="overdue-badge overdue-lo">No next appt set</span>`)
+          + ` Last plan: ${escapeHtml(planLabel)}`;
+        return actionRow({...d, missedDate:null}, key, badge);
+      }).join('');
+
   main.innerHTML =
-    '<div class="patient-header"><div><h1>Defaulter list</h1><div class="meta">Active patients whose last scheduled appointment has passed without a recorded review</div></div>'+
-    '<div class="header-stats"><div class="stat-box '+(defaulters.length>0?'alert':'ok')+'"><div class="label">Defaulters</div><div class="value">'+defaulters.length+'</div></div></div></div>'+
+    '<div class="patient-header"><div><h1>Defaulter list</h1><div class="meta">Overdue appointments and patients without a scheduled follow-up</div></div>'+
+    '<div class="header-stats">'+
+      '<div class="stat-box '+(overdue.length>0?'alert':'ok')+'"><div class="label">Overdue</div><div class="value">'+overdue.length+'</div></div>'+
+      '<div class="stat-box '+(missingAppt.filter(d=>d.isReferral).length>0?'alert':'')+'"><div class="label">No appt</div><div class="value">'+missingAppt.length+'</div></div>'+
+    '</div></div>'+
+
     '<div class="card">'+
-      '<h3>Outstanding defaulters</h3>'+
-      '<p class="hint" style="margin-bottom:14px;">A patient appears here when their most recent review\'s "Next appointment" date has passed and no new review has been recorded. Click their name to open their record. Mark as Resolved once followed up.</p>'+
-      (defaulters.length?'<div style="display:grid; grid-template-columns:1.6fr 1.2fr 1.2fr 0.5fr; gap:10px; padding:0 0 8px; font-size:10.5px; text-transform:uppercase; letter-spacing:0.5px; color:var(--ink-soft);">'+
-        '<div>Patient</div><div>Action taken</div><div>Notes</div><div></div></div>':'')+
-      rows+
+      '<h3>Overdue appointments</h3>'+
+      '<p class="hint" style="margin-bottom:12px;">Last scheduled "Next appointment" date has passed with no new review recorded.</p>'+
+      overdueRows+
+    '</div>'+
+
+    '<div class="card">'+
+      '<h3>Missing next appointment <span style="font-size:11px; color:var(--accent); font-weight:400;">— includes MOPD referrals</span></h3>'+
+      '<p class="hint" style="margin-bottom:12px;">Patients whose last review had no "Next appointment" date set. Referrals to MOPD are flagged in red — confirm they have been seen or arrange follow-up.</p>'+
+      missingRows+
     '</div>';
 }
 
