@@ -162,7 +162,8 @@
       <div class="nav-btn active" id="navPatients" onclick="switchView('patients')" style="flex:1 1 70px;">Patients</div>
       <div class="nav-btn" id="navTTR" onclick="switchView('ttr')" style="flex:1 1 50px;">TTR</div>
       <div class="nav-btn" id="navDefaulters" onclick="switchView('defaulters')" style="flex:1 1 70px;">Defaulters</div>
-      <div class="nav-btn" id="navSettings" onclick="switchView('settings')" style="flex:1 1 80px;">Dosing rules</div>
+      <div class="nav-btn" id="navAnalysis" onclick="switchView('analysis')" style="flex:1 1 70px;">Analysis</div>
+      <div class="nav-btn" id="navSettings" onclick="switchView('settings')" style="flex:1 1 80px;">Rules</div>
     </div>
     <div class="db-status" id="dbStatus"><span class="db-dot pending" id="dbDot"></span><span id="dbStatusText">Checking…</span></div>
     <input class="search" id="searchBox" placeholder="Search name or MRN" oninput="renderPatientList()">
@@ -483,10 +484,12 @@ function switchView(view){
   document.getElementById("navPatients").classList.toggle("active", view==="patients");
   document.getElementById("navTTR").classList.toggle("active", view==="ttr");
   document.getElementById("navDefaulters").classList.toggle("active", view==="defaulters");
+  document.getElementById("navAnalysis").classList.toggle("active", view==="analysis");
   document.getElementById("navSettings").classList.toggle("active", view==="settings");
-  if(view === "patients") renderMain();
-  else if(view === "ttr") renderTTROverview();
-  else if(view === "defaulters") renderDefaultersView();
+  if(view==="patients") renderMain();
+  else if(view==="ttr") renderTTROverview();
+  else if(view==="defaulters") renderDefaultersView();
+  else if(view==="analysis") renderAnalysisView();
   else renderSettingsView();
 }
 
@@ -507,7 +510,7 @@ async function renderPatientList(){
     const row = document.createElement("div");
     row.className = "patient-row" + (p.id === currentPatientId ? " active" : "");
     let pill = ttr===null ? '<span class="ttr-pill ttr-none">TTR --</span>' :
-      (ttr<60 ? '<span class="ttr-pill ttr-bad">TTR '+ttr.toFixed(0)+'%</span>' : '<span class="ttr-pill ttr-good">TTR '+ttr.toFixed(0)+'%</span>');
+      (ttr<60 ? '<span class="ttr-pill ttr-bad">TTR '+ttr.toFixed(1)+'%</span>' : '<span class="ttr-pill ttr-good">TTR '+ttr.toFixed(1)+'%</span>');
     row.innerHTML = '<div class="pname">'+escapeHtml(p.name)+(p.isActive===false?'<span class="status-badge sb-inactive">Inactive</span>':'')+(p.ttrExcluded?'<span class="status-badge sb-excluded">Excl.</span>':'')+'</div><div class="pmrn">'+escapeHtml(p.mrn)+'</div>'+pill;
     row.onclick = () => selectPatient(p.id);
     list.appendChild(row);
@@ -679,14 +682,14 @@ async function renderMain(){
 
   let alertHtml = "";
   if(ttr !== null && ttr < 60){
-    alertHtml = '<div class="alert-banner"><span>&#9888;</span><div><b>Low TTR alert.</b> Time-in-therapeutic-range is '+ttr.toFixed(0)+'%, below the 60% quality threshold. Review dosing, compliance, and contributing factors at the next visit.</div></div>';
+    alertHtml = '<div class="alert-banner"><span>&#9888;</span><div><b>Low TTR alert.</b> Time-in-therapeutic-range is '+ttr.toFixed(1)+'%, below the 60% quality threshold. Review dosing, compliance, and contributing factors at the next visit.</div></div>';
   }
 
   main.innerHTML =
     '<div class="patient-header">'+
       '<div><h1>'+escapeHtml(p.name)+'</h1><div class="meta">MRN '+escapeHtml(p.mrn)+(p.indication?' &middot; '+escapeHtml(p.indication):'')+'</div></div>'+
       '<div class="header-stats">'+
-        '<div class="stat-box '+(ttr===null?'':(ttr<60?'alert':'ok'))+'"><div class="label">TTR</div><div class="value">'+(ttr===null?'--':ttr.toFixed(0)+'%')+'</div></div>'+
+        '<div class="stat-box '+(ttr===null?'':(ttr<60?'alert':'ok'))+'"><div class="label">TTR</div><div class="value">'+(ttr===null?'--':ttr.toFixed(1)+'%')+'</div></div>'+
         '<div class="stat-box" title="Extended TTR: target range expanded ±0.2"><div class="label">Ext. TTR ±0.2</div><div class="value" style="font-size:18px;">'+(extTTR===null?'--':extTTR.toFixed(0)+'%')+'</div></div>'+
         '<div class="stat-box"><div class="label">Target INR</div><div class="value">'+(p.targetLow??'--')+'&ndash;'+(p.targetHigh??'--')+'</div></div>'+
         '<div class="stat-box"><div class="label">Last INR</div><div class="value">'+(lastVisit?lastVisit.inr:'--')+'</div></div>'+
@@ -798,10 +801,26 @@ async function renderReviewPanel(p){
       '<div class="field" style="margin-bottom:14px;"><label>Action</label>'+
         '<select id="rv_plan_action" onchange="onPlanChange()">'+
           '<option value="continue">Continue dose</option>'+
+          '<option value="increase">Increase dose</option>'+
+          '<option value="reduce">Reduce dose</option>'+
           '<option value="load">Load dose</option>'+
           '<option value="withhold">Withhold dose</option>'+
           '<option value="refer_mopd">Refer MOPD</option>'+
         '</select>'+
+      '</div>'+
+      '<div id="rv_increase_wrap" style="display:none; margin-bottom:10px;">'+
+        '<div class="grid3">'+
+          '<div class="field"><label>Increase TWD by (%)</label><input id="rv_increase_pct" type="number" step="1" min="1" oninput="onPctChange(this.value,1)"></div>'+
+          '<div class="field"><label>Calculated new TWD (mg/week)</label><input id="rv_increase_twd_calc" readonly style="background:#F3F5F8; color:var(--ink-soft);"></div>'+
+          '<div></div>'+
+        '</div>'+
+      '</div>'+
+      '<div id="rv_reduce_wrap" style="display:none; margin-bottom:10px;">'+
+        '<div class="grid3">'+
+          '<div class="field"><label>Reduce TWD by (%)</label><input id="rv_reduce_pct" type="number" step="1" min="1" oninput="onPctChange(this.value,-1)"></div>'+
+          '<div class="field"><label>Calculated new TWD (mg/week)</label><input id="rv_reduce_twd_calc" readonly style="background:#F3F5F8; color:var(--ink-soft);"></div>'+
+          '<div></div>'+
+        '</div>'+
       '</div>'+
       '<div id="rv_load_wrap" style="display:none;">'+
         '<div class="grid3" style="margin-bottom:10px;">'+
@@ -812,7 +831,11 @@ async function renderReviewPanel(p){
             '<option value="increase">Increase TWD by %</option>'+
           '</select></div>'+
         '</div>'+
-        '<div class="field" id="rv_load_pct_wrap" style="display:none; margin-bottom:6px; max-width:240px;"><label>Increase TWD by (%)</label><input id="rv_load_pct" type="number" step="1"></div>'+
+        '<div class="grid3" id="rv_load_pct_wrap" style="display:none; margin-bottom:6px;">'+
+          '<div class="field"><label>Increase TWD by (%)</label><input id="rv_load_pct" type="number" step="1" oninput="onPctChange(this.value,1)"></div>'+
+          '<div class="field"><label>Calculated new TWD</label><input id="rv_load_twd_calc" readonly style="background:#F3F5F8; color:var(--ink-soft);"></div>'+
+          '<div></div>'+
+        '</div>'+
       '</div>'+
       '<div id="rv_withhold_wrap" style="display:none;">'+
         '<div class="grid3" style="margin-bottom:10px;">'+
@@ -823,23 +846,28 @@ async function renderReviewPanel(p){
           '</select></div>'+
           '<div></div>'+
         '</div>'+
-        '<div class="field" id="rv_withhold_pct_wrap" style="display:none; margin-bottom:6px; max-width:240px;"><label>Reduce TWD by (%)</label><input id="rv_withhold_pct" type="number" step="1"></div>'+
+        '<div class="grid3" id="rv_withhold_pct_wrap" style="display:none; margin-bottom:6px;">'+
+          '<div class="field"><label>Reduce TWD by (%)</label><input id="rv_withhold_pct" type="number" step="1" oninput="onPctChange(this.value,-1)"></div>'+
+          '<div class="field"><label>Calculated new TWD</label><input id="rv_withhold_twd_calc" readonly style="background:#F3F5F8; color:var(--ink-soft);"></div>'+
+          '<div></div>'+
+        '</div>'+
       '</div>'+
       '<div class="grid" style="margin-top:8px;">'+
-        '<div class="field"><label>New TWD (mg/week)</label><input id="rv_new_twd" type="number" step="0.5" oninput="onNewTwdChange()"></div>'+
+        '<div class="field"><label>New TWD (mg/week) <span style="font-size:10.5px; color:var(--ink-soft);">— auto-filled by % above, or enter manually</span></label><input id="rv_new_twd" type="number" step="0.5" oninput="onNewTwdChange()"></div>'+
         '<div class="field"><label>Next appointment</label><input id="rv_next_appt" type="date"></div>'+
       '</div>'+
       '<div class="regime-section" style="margin-top:14px;">'+
         '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">'+
-          '<div><b style="font-size:13px;">Regime suggestion</b><span class="hint" style="margin-top:0; margin-left:8px;">Based on available tablet strengths. Click to select.</span></div>'+
+          '<div><b style="font-size:13px;">Regime suggestion</b><span class="hint" style="margin-top:0; margin-left:8px;">Click a card to select, then pick start day.</span></div>'+
           '<button class="btn" style="font-size:12px; padding:6px 12px;" onclick="onNewTwdChange()">Refresh</button>'+
         '</div>'+
         '<div id="regimeSuggestBox"><div class="hint">Enter a new TWD above to see regime options.</div></div>'+
       '</div>'+
-      '<div class="row-actions"><button class="btn btn-primary" onclick="saveReview()">Save review</button></div>'+
+      '<div class="row-actions"><button class="btn btn-primary" id="saveReviewBtn" onclick="saveReview()">Save review</button></div>'+
     '</div>';
 
   selectedRegimeLabel = "";
+  editingVisitId = null;
   onInrChange(p);
 }
 
@@ -861,14 +889,35 @@ async function onInrChange(pArg){
 
 function onPlanChange(){
   const action = document.getElementById("rv_plan_action").value;
+  document.getElementById("rv_increase_wrap").style.display = action==="increase" ? "block" : "none";
+  document.getElementById("rv_reduce_wrap").style.display = action==="reduce" ? "block" : "none";
   document.getElementById("rv_load_wrap").style.display = action==="load" ? "block" : "none";
   document.getElementById("rv_withhold_wrap").style.display = action==="withhold" ? "block" : "none";
 }
 function onSubActionChange(){
   const loadThen = document.getElementById("rv_load_then").value;
-  document.getElementById("rv_load_pct_wrap").style.display = loadThen==="increase" ? "block" : "none";
+  document.getElementById("rv_load_pct_wrap").style.display = loadThen==="increase" ? "grid" : "none";
   const withholdThen = document.getElementById("rv_withhold_then").value;
-  document.getElementById("rv_withhold_pct_wrap").style.display = withholdThen==="reduce" ? "block" : "none";
+  document.getElementById("rv_withhold_pct_wrap").style.display = withholdThen==="reduce" ? "grid" : "none";
+}
+
+function calcNewTwdFromPct(pct, direction){
+  const currentTwd = parseFloat(document.getElementById("rv_twd").value);
+  if(isNaN(currentTwd)||currentTwd<=0||!pct) return null;
+  const maxChange = 7;
+  let change = currentTwd * (Math.abs(parseFloat(pct))/100);
+  if(change > maxChange) change = maxChange;
+  return Math.round((currentTwd + direction*change)*10)/10;
+}
+function onPctChange(pct, direction){
+  const newTwd = calcNewTwdFromPct(pct, direction);
+  // Update calc display fields
+  const calcIds = {1:['rv_increase_twd_calc','rv_load_twd_calc'], '-1':['rv_reduce_twd_calc','rv_withhold_twd_calc']};
+  (calcIds[direction]||[]).forEach(id => { const el=document.getElementById(id); if(el&&newTwd!==null) el.value=newTwd+'mg'; });
+  if(newTwd!==null){
+    document.getElementById("rv_new_twd").value = newTwd;
+    onNewTwdChange();
+  }
 }
 
 async function onNewTwdChange(){
@@ -877,6 +926,8 @@ async function onNewTwdChange(){
   const strengths = rules.tabletStrengths || DEFAULT_RULES.tabletStrengths;
   renderRegimeSuggestions(newTwd, strengths);
 }
+
+let editingVisitId = null;
 
 async function saveReview(){
   const date = document.getElementById("rv_date").value;
@@ -894,20 +945,25 @@ async function saveReview(){
 
   const ruleBox = document.querySelector("#ruleSuggestionBox .suggestion-box");
   const planAction = document.getElementById("rv_plan_action").value;
-  let planDays = "", planLoadMg = "", planSubAction = "", planSubPct = "";
-  if(planAction === "load"){
+  let planDays="", planLoadMg="", planSubAction="", planSubPct="";
+  if(planAction==="load"){
     planLoadMg = document.getElementById("rv_load_mg").value;
     planDays = document.getElementById("rv_load_days").value;
     planSubAction = document.getElementById("rv_load_then").value;
-    planSubPct = planSubAction === "increase" ? document.getElementById("rv_load_pct").value : "";
-  } else if(planAction === "withhold"){
+    planSubPct = planSubAction==="increase" ? document.getElementById("rv_load_pct").value : "";
+  } else if(planAction==="withhold"){
     planDays = document.getElementById("rv_withhold_days").value;
     planSubAction = document.getElementById("rv_withhold_then").value;
-    planSubPct = planSubAction === "reduce" ? document.getElementById("rv_withhold_pct").value : "";
+    planSubPct = planSubAction==="reduce" ? document.getElementById("rv_withhold_pct").value : "";
+  } else if(planAction==="increase"){
+    planSubPct = document.getElementById("rv_increase_pct").value;
+  } else if(planAction==="reduce"){
+    planSubPct = document.getElementById("rv_reduce_pct").value;
   }
 
+  const visitId = editingVisitId || ("v_"+Date.now());
   const visit = {
-    id:"v_"+Date.now(), date,
+    id: visitId, date,
     twd: document.getElementById("rv_twd").value,
     inr: document.getElementById("rv_inr").value,
     factors, factorNotes,
@@ -920,10 +976,20 @@ async function saveReview(){
     regimeLabel: selectedRegimeLabel || ""
   };
 
-  await insertVisitRow(currentPatientId, visit);
-  const visits = await loadVisits(currentPatientId);
-  visits.push(visit);
-  visitsCache[currentPatientId] = visits;
+  if(editingVisitId){
+    await upsertVisitRow(currentPatientId, visit);
+    const visits = await loadVisits(currentPatientId);
+    const idx = visits.findIndex(v=>v.id===editingVisitId);
+    if(idx>=0) visits[idx]=visit; else visits.push(visit);
+    visitsCache[currentPatientId] = visits;
+    editingVisitId = null;
+  } else {
+    await insertVisitRow(currentPatientId, visit);
+    const visits = await loadVisits(currentPatientId);
+    visits.push(visit);
+    visitsCache[currentPatientId] = visits;
+  }
+
   await renderPatientList();
   await renderMain();
   showTab("history");
@@ -931,17 +997,19 @@ async function saveReview(){
 
 // ---------- History panel ----------
 function planLabel(v){
-  if(v.planAction === "continue") return "Continue dose";
-  if(v.planAction === "refer_mopd") return "Refer MOPD";
-  if(v.planAction === "load"){
-    const then = v.planSubAction === "increase" ? `then increase TWD by ${v.planSubPct||"?"}%` : "then continue dose";
+  if(v.planAction==="continue") return "Continue dose";
+  if(v.planAction==="refer_mopd") return "Refer MOPD";
+  if(v.planAction==="increase") return `Increase TWD by ${v.planSubPct||"?"}%`;
+  if(v.planAction==="reduce") return `Reduce TWD by ${v.planSubPct||"?"}%`;
+  if(v.planAction==="load"){
+    const then = v.planSubAction==="increase" ? `then increase TWD by ${v.planSubPct||"?"}%` : "then continue dose";
     return `Load dose ${v.planLoadMg||"?"}mg for ${v.planDays||"?"}d, ${then}`;
   }
-  if(v.planAction === "withhold"){
-    const then = v.planSubAction === "reduce" ? `then reduce TWD by ${v.planSubPct||"?"}%` : "then continue dose";
+  if(v.planAction==="withhold"){
+    const then = v.planSubAction==="reduce" ? `then reduce TWD by ${v.planSubPct||"?"}%` : "then continue dose";
     return `Withhold ${v.planDays||"?"}d, ${then}`;
   }
-  return v.planAction || "--";
+  return v.planAction||"--";
 }
 function renderHistoryPanel(p, visits, ttr, extTTR){
   const el = document.getElementById("panelHistory");
@@ -975,7 +1043,7 @@ function renderHistoryPanel(p, visits, ttr, extTTR){
       }).join("");
       const admitHtml = v.admitDate ? (escapeHtml(v.admitDate)+(v.admitDx?' &mdash; '+escapeHtml(v.admitDx):'')) : '<span style="color:var(--ink-soft);">&mdash;</span>';
       rows += '<tr>'+
-        '<td>'+escapeHtml(v.date)+'</td>'+
+        '<td>'+escapeHtml(v.date)+'<br><button class="btn" style="padding:3px 9px; font-size:11px; margin-top:4px;" onclick="editReview(\''+v.id+'\')">Edit</button></td>'+
         '<td><span class="badge '+(inRange?'badge-good':'badge-bad')+'">'+(v.inr||'--')+'</span><br><span style="font-size:11px; color:var(--ink-soft);">TWD '+(v.twd||'--')+'mg</span></td>'+
         '<td>'+(factorsHtml||'<span style="color:var(--ink-soft);">&mdash;</span>')+'</td>'+
         '<td>'+admitHtml+'</td>'+
@@ -986,6 +1054,53 @@ function renderHistoryPanel(p, visits, ttr, extTTR){
   }
 
   el.innerHTML = ttrSummary+'<div class="card"><h3>Review history</h3><table class="history"><thead><tr><th>Date</th><th>INR / TWD</th><th>Factors</th><th>Ward admission</th><th>Plan</th><th>Next appt</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+}
+
+async function editReview(visitId){
+  const visits = await loadVisits(currentPatientId);
+  const v = visits.find(x=>x.id===visitId);
+  if(!v) return;
+  editingVisitId = visitId;
+  const p = patients.find(x=>x.id===currentPatientId);
+  await renderReviewPanel(p);
+  showTab("review");
+  // Pre-fill all fields
+  document.getElementById("rv_date").value = v.date||"";
+  document.getElementById("rv_twd").value = v.twd||"";
+  document.getElementById("rv_inr").value = v.inr||"";
+  document.getElementById("rv_admit_date").value = v.admitDate||"";
+  document.getElementById("rv_admit_dx").value = v.admitDx||"";
+  document.getElementById("rv_new_twd").value = v.newTwd||"";
+  document.getElementById("rv_next_appt").value = v.nextAppt||"";
+  // Pre-fill factors
+  document.querySelectorAll(".factor-check").forEach(cb=>{
+    const checked = (v.factors||[]).includes(cb.value);
+    cb.checked = checked;
+    const noteEl = document.getElementById("factor_note_"+cb.dataset.idx);
+    if(noteEl){ noteEl.style.display = checked?"block":"none"; if(checked) noteEl.value=(v.factorNotes||{})[cb.value]||""; }
+  });
+  // Pre-fill plan
+  const planSel = document.getElementById("rv_plan_action");
+  if(planSel) planSel.value = v.planAction||"continue";
+  onPlanChange();
+  if(v.planAction==="increase" && v.planSubPct){ const el=document.getElementById("rv_increase_pct"); if(el) el.value=v.planSubPct; }
+  if(v.planAction==="reduce" && v.planSubPct){ const el=document.getElementById("rv_reduce_pct"); if(el) el.value=v.planSubPct; }
+  if(v.planAction==="load"){
+    const a=document.getElementById("rv_load_mg"); if(a) a.value=v.planLoadMg||"";
+    const b=document.getElementById("rv_load_days"); if(b) b.value=v.planDays||"";
+    const c=document.getElementById("rv_load_then"); if(c){ c.value=v.planSubAction||"continue"; onSubActionChange(); }
+    if(v.planSubAction==="increase"){ const d=document.getElementById("rv_load_pct"); if(d) d.value=v.planSubPct||""; }
+  }
+  if(v.planAction==="withhold"){
+    const a=document.getElementById("rv_withhold_days"); if(a) a.value=v.planDays||"";
+    const b=document.getElementById("rv_withhold_then"); if(b){ b.value=v.planSubAction||"continue"; onSubActionChange(); }
+    if(v.planSubAction==="reduce"){ const c=document.getElementById("rv_withhold_pct"); if(c) c.value=v.planSubPct||""; }
+  }
+  selectedRegimeLabel = v.regimeLabel||"";
+  // Update save button label
+  const btn=document.getElementById("saveReviewBtn"); if(btn) btn.innerText="Update review";
+  await onInrChange(p);
+  if(v.newTwd) await onNewTwdChange();
 }
 
 // ---------- TTR Overview ----------
@@ -1306,28 +1421,167 @@ function generateRegimeSuggestions(targetTWD, strengths){
   return results.sort((a,b)=>a.error-b.error || b.simplicity-a.simplicity).slice(0,5);
 }
 
+function buildRegimeLabel(s, startIdx){
+  if(s.highDose===s.lowDose || s.nHigh===7 || s.nHigh===0){
+    return s.highDose+'mg every day (OD)';
+  }
+  const nH = s.nHigh, nL = 7-nH;
+  const hDays=[]; for(let i=0;i<nH;i++) hDays.push((startIdx+i)%7);
+  const lDays=[]; for(let i=nH;i<7;i++) lDays.push((startIdx+i)%7);
+  const hStr = nH===1 ? DAY_NAMES[hDays[0]] : DAY_NAMES[hDays[0]]+'–'+DAY_NAMES[hDays[nH-1]];
+  const lStr = nL===1 ? DAY_NAMES[lDays[0]] : DAY_NAMES[lDays[0]]+'–'+DAY_NAMES[lDays[nL-1]];
+  return s.highDose+'mg ('+hStr+') + '+s.lowDose+'mg ('+lStr+')';
+}
+
+function updateRegimeDayLabel(cardIdx){
+  const sel = document.getElementById("regimeStartDay_"+cardIdx);
+  const card = document.getElementById("regimeCard_"+cardIdx);
+  if(!sel||!card) return;
+  const startIdx = parseInt(sel.value);
+  const s = window._regimeSuggestions[cardIdx];
+  const label = buildRegimeLabel(s, startIdx);
+  const labelEl = card.querySelector(".regime-label");
+  if(labelEl) labelEl.innerText = label;
+  if(card.classList.contains("selected")){
+    selectedRegimeLabel = label + ' — TWD '+s.actualTWD+'mg/week';
+  }
+}
+
 function renderRegimeSuggestions(targetTWD, strengths){
   const suggestions = generateRegimeSuggestions(parseFloat(targetTWD), strengths);
   const box = document.getElementById("regimeSuggestBox");
   if(!box) return;
   if(!targetTWD || suggestions.length===0){
-    box.innerHTML = '<div class="hint">Enter a new TWD to generate regime options. (Max 1mg difference between any two days enforced.)</div>';
+    box.innerHTML = '<div class="hint">Enter a new TWD to see regime options. (Max 1mg difference between adjacent days enforced.)</div>';
     return;
   }
-  box.innerHTML = suggestions.map((s,i) =>
-    '<div class="regime-card" id="regimeCard_'+i+'" onclick="selectRegime('+i+','+JSON.stringify(s).replace(/"/g,"&quot;")+')" title="Click to select this regime">'+
-      '<div class="regime-label">'+escapeHtml(s.label)+'</div>'+
-      '<div class="regime-twd">TWD: '+s.actualTWD+'mg/week'+(s.error>0.05?' (±'+s.error.toFixed(1)+'mg from target)':'')+'</div>'+
-      '<div style="font-size:11.5px; color:var(--ink-soft); margin-top:3px;">'+escapeHtml(s.detail)+'</div>'+
-    '</div>'
-  ).join('');
+  window._regimeSuggestions = suggestions;
+  box.innerHTML = suggestions.map((s,i) => {
+    const isUniform = (s.highDose===s.lowDose||s.nHigh===7||s.nHigh===0);
+    const dayPickerHtml = isUniform ? '' :
+      '<div style="display:flex; align-items:center; gap:8px; margin-top:6px;">'+
+        '<label style="font-size:11.5px; color:var(--ink-soft); white-space:nowrap;">Start day:</label>'+
+        '<select id="regimeStartDay_'+i+'" style="font-size:12px; padding:3px 7px; border-radius:5px; border:1px solid var(--line); background:#FCFBF7;" onchange="updateRegimeDayLabel('+i+')" onclick="event.stopPropagation()">'+
+          DAY_NAMES.map((d,di)=>'<option value="'+di+'"'+( di===0?' selected':'')+'>'+d+'</option>').join('')+
+        '</select>'+
+      '</div>';
+    const initialLabel = buildRegimeLabel(s, 0);
+    return '<div class="regime-card" id="regimeCard_'+i+'" onclick="selectRegime('+i+')">'+
+      '<div class="regime-label">'+escapeHtml(initialLabel)+'</div>'+
+      '<div class="regime-twd">TWD: '+s.actualTWD+'mg/week'+(s.error>0.05?' (±'+s.error.toFixed(1)+'mg)':'')+'</div>'+
+      dayPickerHtml+
+    '</div>';
+  }).join('');
 }
 
 let selectedRegimeLabel = "";
-function selectRegime(idx, s){
-  selectedRegimeLabel = s.label + ' — TWD ' + s.actualTWD + 'mg/week';
+function selectRegime(idx){
+  const s = window._regimeSuggestions[idx];
+  const sel = document.getElementById("regimeStartDay_"+idx);
+  const startIdx = sel ? parseInt(sel.value) : 0;
+  selectedRegimeLabel = buildRegimeLabel(s, startIdx) + ' — TWD '+s.actualTWD+'mg/week';
   document.getElementById("rv_new_twd").value = s.actualTWD;
-  document.querySelectorAll(".regime-card").forEach((el,i) => el.classList.toggle("selected", i===idx));
+  document.querySelectorAll(".regime-card").forEach((el,i)=>el.classList.toggle("selected",i===idx));
+  onNewTwdChange();
+}
+
+// ---------- Analysis view (TTR < 60%) ----------
+async function renderAnalysisView(){
+  const main = document.getElementById("main");
+  if(!configOk){ main.innerHTML = configWarningHtml(); return; }
+
+  const ttrData = [];
+  for(const p of patients){
+    if(p.isActive===false || p.ttrExcluded) continue;
+    const visits = await loadVisits(p.id);
+    const ttr = calcTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
+    if(ttr!==null) ttrData.push({p, ttr, visits});
+  }
+
+  const below60 = ttrData.filter(d=>d.ttr<60);
+  const above60 = ttrData.filter(d=>d.ttr>=60);
+  const avgBelow = below60.length ? below60.reduce((s,d)=>s+d.ttr,0)/below60.length : null;
+  const avgAbove = above60.length ? above60.reduce((s,d)=>s+d.ttr,0)/above60.length : null;
+
+  // Factor frequency from visits of below-60% patients
+  const factorCounts = {};
+  for(const d of below60){
+    for(const v of d.visits){
+      for(const f of (v.factors||[])){
+        if(f==="No significant factor detected") continue;
+        factorCounts[f] = (factorCounts[f]||0)+1;
+      }
+    }
+  }
+  const sortedFactors = Object.entries(factorCounts).sort((a,b)=>b[1]-a[1]);
+  const maxCount = sortedFactors[0]?.[1]||1;
+
+  const factorBars = sortedFactors.length===0
+    ? '<div class="empty-state">No contributing factors recorded for below-60% patients.</div>'
+    : sortedFactors.map(([f,n])=>
+        '<div style="margin-bottom:10px;">'+
+          '<div style="display:flex; justify-content:space-between; font-size:12.5px; margin-bottom:3px;">'+
+            '<span>'+escapeHtml(f)+'</span><span style="font-family:var(--mono); font-weight:700;">'+n+'</span>'+
+          '</div>'+
+          '<div style="background:#EFEAE0; border-radius:4px; height:8px;">'+
+            '<div style="background:var(--accent); border-radius:4px; height:8px; width:'+Math.round(n/maxCount*100)+'%;"></div>'+
+          '</div>'+
+        '</div>'
+      ).join('');
+
+  // INR distribution of below-60% patients
+  const inrRanges = {'<1.5':0,'1.5–1.9':0,'2.0–2.9':0,'3.0–3.5':0,'3.6–4.0':0,'4.1–5.0':0,'>5.0':0};
+  for(const d of below60){
+    for(const v of d.visits){
+      const inr=parseFloat(v.inr);
+      if(isNaN(inr)) continue;
+      if(inr<1.5) inrRanges['<1.5']++;
+      else if(inr<2.0) inrRanges['1.5–1.9']++;
+      else if(inr<3.0) inrRanges['2.0–2.9']++;
+      else if(inr<3.6) inrRanges['3.0–3.5']++;
+      else if(inr<4.1) inrRanges['3.6–4.0']++;
+      else if(inr<5.1) inrRanges['4.1–5.0']++;
+      else inrRanges['>5.0']++;
+    }
+  }
+  const maxInr = Math.max(...Object.values(inrRanges),1);
+  const inrBars = Object.entries(inrRanges).map(([r,n])=>
+    '<div style="margin-bottom:8px;">'+
+      '<div style="display:flex; justify-content:space-between; font-size:12.5px; margin-bottom:3px;">'+
+        '<span style="font-family:var(--mono);">'+r+'</span><span style="font-weight:700;">'+n+'</span>'+
+      '</div>'+
+      '<div style="background:#EFEAE0; border-radius:4px; height:8px;">'+
+        '<div style="background:'+(r==='2.0–2.9'||r==='3.0–3.5'?'var(--good)':'var(--warn)')+'; border-radius:4px; height:8px; width:'+Math.round(n/maxInr*100)+'%;"></div>'+
+      '</div>'+
+    '</div>'
+  ).join('');
+
+  // Patient list sorted by TTR
+  const patientRows = below60.sort((a,b)=>a.ttr-b.ttr).map(d=>
+    '<tr>'+
+      '<td style="cursor:pointer; color:var(--accent); font-weight:600;" onclick="selectPatient(\''+d.p.id+'\')">'+escapeHtml(d.p.name)+'</td>'+
+      '<td style="font-family:var(--mono); font-size:12px;">'+escapeHtml(d.p.mrn)+'</td>'+
+      '<td style="font-size:12px;">'+escapeHtml(d.p.indication||'—')+'</td>'+
+      '<td><span class="badge badge-bad">'+d.ttr.toFixed(1)+'%</span></td>'+
+      '<td style="font-size:12px;">'+d.visits.length+'</td>'+
+    '</tr>'
+  ).join('');
+
+  main.innerHTML =
+    '<div class="patient-header"><div><h1>TTR Analysis</h1><div class="meta">Active, included patients only · TTR &lt; 60% quality threshold</div></div></div>'+
+    '<div class="ttr-overview-header">'+
+      '<div class="ttr-avg-box bad"><div class="av-label">Below 60%</div><div class="av-value">'+below60.length+'</div><div style="font-size:11px; color:var(--ink-soft); margin-top:4px;">'+(avgBelow!==null?'avg '+avgBelow.toFixed(1)+'%':'—')+'</div></div>'+
+      '<div class="ttr-avg-box good"><div class="av-label">Above 60%</div><div class="av-value">'+above60.length+'</div><div style="font-size:11px; color:var(--ink-soft); margin-top:4px;">'+(avgAbove!==null?'avg '+avgAbove.toFixed(1)+'%':'—')+'</div></div>'+
+      '<div class="ttr-count-box" style="align-self:center;"><div class="cv-label">Total analysed</div><div class="cv-value">'+ttrData.length+'</div></div>'+
+    '</div>'+
+    '<div style="display:grid; grid-template-columns:1fr 1fr; gap:18px;">'+
+      '<div class="card"><h3>Contributing factors in below-60% patients</h3>'+factorBars+'</div>'+
+      '<div class="card"><h3>INR distribution in below-60% patients</h3>'+inrBars+'</div>'+
+    '</div>'+
+    '<div class="card"><h3>Below-60% patient list</h3>'+
+    (below60.length===0?'<div class="empty-state">No patients below 60% TTR — good control!</div>':
+      '<table class="ttr-table"><thead><tr><th>Patient</th><th>MRN</th><th>Indication</th><th>TTR</th><th>Reviews</th></tr></thead><tbody>'+patientRows+'</tbody></table>')+
+    '</div>';
 }
 
 async function renderSettingsView(){
