@@ -898,7 +898,6 @@ function renderProfilePanel(p){
       '<div class="field span2"><label>Clinical notes <span style="font-size:10.5px;color:var(--ink-soft);">Press Enter to start a new numbered point</span></label>'+
         '<textarea id="pf_notes" rows="5" placeholder="Type note then press Enter to add numbered points…" style="resize:vertical;" onkeydown="handleNotesEnter(event)">'+escapeHtml(p.notes||'')+'</textarea>'+
       '</div>'+
-    '</div>'
     '</div></div>'+
     '<div class="card"><h3>Status &amp; TTR inclusion</h3>'+
       '<div class="grid">'+
@@ -930,12 +929,18 @@ function handleNotesEnter(e){
 }
 async function saveProfile(){
   const p = patients.find(x => x.id === currentPatientId);
-  p.name = document.getElementById("pf_name").value.trim() || p.name;
-  p.mrn = document.getElementById("pf_mrn").value.trim() || p.mrn;
+  if(!p){ showToast("No patient selected","error"); return; }
+  const nameEl = document.getElementById("pf_name");
+  const mrnEl = document.getElementById("pf_mrn");
+  if(!nameEl || !mrnEl){ showToast("Profile form not found — try reloading the patient","error"); return; }
+  p.name = nameEl.value.trim() || p.name;
+  p.mrn = mrnEl.value.trim() || p.mrn;
   p.phone = document.getElementById("pf_phone").value.trim();
   p.indication = document.getElementById("pf_indication").value.trim();
-  p.targetLow = parseFloat(document.getElementById("pf_targetLow").value);
-  p.targetHigh = parseFloat(document.getElementById("pf_targetHigh").value);
+  const newLow = parseFloat(document.getElementById("pf_targetLow").value);
+  const newHigh = parseFloat(document.getElementById("pf_targetHigh").value);
+  if(!isNaN(newLow)) p.targetLow = newLow;
+  if(!isNaN(newHigh)) p.targetHigh = newHigh;
   p.duration = document.getElementById("pf_duration").value.trim();
   p.notes = document.getElementById("pf_notes").value.trim();
   p.initiationDate = document.getElementById("pf_initiationDate").value || "";
@@ -943,6 +948,7 @@ async function saveProfile(){
   p.ttrExcluded = document.getElementById("pf_ttrExcluded").value === "true";
   p.ttrExcludeReason = document.getElementById("pf_ttrExcludeReason").value.trim();
   await upsertPatientRow(p);
+  showToast("Patient saved ✓","success",2000);
   await renderPatientList();
   await renderMain();
   showTab("profile");
