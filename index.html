@@ -1199,8 +1199,51 @@ let editingVisitId = null;
 
 async function saveReview(){
   const date = document.getElementById("rv_date").value;
-  if(!date){ alert("Enter a review date."); return; }
+  if(!date){ showToast("Enter a review date.","error"); return; }
 
+  const inr = document.getElementById("rv_inr").value;
+  const newTwd = document.getElementById("rv_new_twd").value;
+  const nextAppt = document.getElementById("rv_next_appt").value;
+
+  // ── Validation ──
+  const errors = [];
+
+  if(!inr || isNaN(parseFloat(inr))){
+    errors.push("INR result is required.");
+  }
+
+  // If INR is out of range, at least one factor must be selected
+  const p = patients.find(x=>x.id===currentPatientId);
+  const low = parseFloat(p?.targetLow||2), high = parseFloat(p?.targetHigh||3);
+  const inrNum = parseFloat(inr);
+  const outOfRange = !isNaN(inrNum) && (inrNum < low || inrNum > high);
+  const checkedFactors = [...document.querySelectorAll(".factor-check")].filter(c=>c.checked);
+  if(outOfRange && checkedFactors.length === 0){
+    errors.push("INR is out of range — please select at least one contributing factor.");
+  }
+
+  // Regime must be set if a new TWD was entered and plan isn't continue/refer/withhold
+  const planAction = document.getElementById("rv_plan_action").value;
+  const isOther = document.getElementById("rv_regime_other")?.checked;
+  const manualRegime = document.getElementById("rv_regime_manual")?.value?.trim()||"";
+  if(isOther) selectedRegimeLabel = manualRegime;
+  if(newTwd && planAction !== "refer_mopd" && planAction !== "withhold"){
+    const regimeSet = isOther ? !!manualRegime : !!selectedRegimeLabel;
+    if(!regimeSet){
+      errors.push("Please select or enter a warfarin regime for the new TWD.");
+    }
+  }
+
+  if(!nextAppt){
+    errors.push("Next appointment date is required.");
+  }
+
+  if(errors.length > 0){
+    errors.forEach((e,i) => setTimeout(()=>showToast(e,"error",5000), i*300));
+    return;
+  }
+
+  // ── Collect data ──
   const factors = [];
   const factorNotes = {};
   document.querySelectorAll(".factor-check").forEach(cb => {
@@ -1212,7 +1255,6 @@ async function saveReview(){
   });
 
   const ruleBox = document.querySelector("#ruleSuggestionBox .suggestion-box");
-  const planAction = document.getElementById("rv_plan_action").value;
   let planDays="", planLoadMg="", planSubAction="", planSubPct="";
   if(planAction==="load"){
     planLoadMg = document.getElementById("rv_load_mg").value;
@@ -1230,37 +1272,34 @@ async function saveReview(){
   }
 
   const inrDayBefore = document.getElementById("rv_inr_day_before")?.checked||false;
-  const isOther = document.getElementById("rv_regime_other")?.checked;
-  if(isOther) selectedRegimeLabel = document.getElementById("rv_regime_manual")?.value||"";
 
   const visitId = editingVisitId || ("v_"+Date.now());
   const visit = {
     id: visitId, date,
     twd: document.getElementById("rv_twd").value,
-    inr: document.getElementById("rv_inr").value,
-    factors, factorNotes, inrDayBefore,
+    inr, factors, factorNotes, inrDayBefore,
     admitDate: document.getElementById("rv_admit_date").value,
     admitDx: document.getElementById("rv_admit_dx").value.trim(),
     planAction, planDays, planLoadMg, planSubAction, planSubPct,
-    newTwd: document.getElementById("rv_new_twd").value,
-    nextAppt: document.getElementById("rv_next_appt").value,
+    newTwd, nextAppt,
     clinicalNote: ruleBox ? ruleBox.innerText.replace("Rule-based suggestion: ","") : "",
     regimeLabel: selectedRegimeLabel || "",
     reviewer: currentReviewerName || currentSession?.user?.email || ""
   };
 
   if(editingVisitId){
+    // Upsert to DB, then update cache directly (avoids stale re-fetch race)
     await upsertVisitRow(currentPatientId, visit);
-    const visits = await loadVisits(currentPatientId);
-    const idx = visits.findIndex(v=>v.id===editingVisitId);
-    if(idx>=0) visits[idx]=visit; else visits.push(visit);
-    visitsCache[currentPatientId] = visits;
+    if(!visitsCache[currentPatientId]) visitsCache[currentPatientId] = [];
+    const idx = visitsCache[currentPatientId].findIndex(v=>v.id===editingVisitId);
+    if(idx>=0) visitsCache[currentPatientId][idx] = visit;
+    else visitsCache[currentPatientId].push(visit);
     editingVisitId = null;
+    showToast("Review updated ✓","success",2000);
   } else {
     await insertVisitRow(currentPatientId, visit);
-    const visits = await loadVisits(currentPatientId);
-    visits.push(visit);
-    visitsCache[currentPatientId] = visits;
+    if(!visitsCache[currentPatientId]) visitsCache[currentPatientId] = [];
+    visitsCache[currentPatientId].push(visit);
   }
 
   await renderPatientList();
