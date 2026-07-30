@@ -2085,147 +2085,181 @@ async function generateTTRReport(){
     const byYear=calcTTRByYear(visits,parseFloat(p.targetLow),parseFloat(p.targetHigh));
     const flags=getSpecialFlags(p,visits);
     const status=getPatientStatus(visits);
-    ttrData.push({p,ttr,extTTR,byYear,flags,visits,status});
+    // Per-patient factor count (from all visits, not just out-of-range)
+    const ptFactors={};
+    for(const v of visits) for(const f of (v.factors||[])) if(f!=="No significant factor detected"){ptFactors[f]=(ptFactors[f]||0)+1;}
+    const narrowRange = (parseFloat(p.targetHigh)-parseFloat(p.targetLow))<=0.5;
+    ttrData.push({p,ttr,extTTR,byYear,flags,visits,status,ptFactors,narrowRange});
   }
+
   const included=ttrData.filter(d=>!d.p.ttrExcluded&&d.ttr!==null);
   const avgTTR=included.length?included.reduce((s,d)=>s+d.ttr,0)/included.length:null;
   const avgExt=included.filter(d=>d.extTTR!==null).length?included.filter(d=>d.extTTR!==null).reduce((s,d)=>s+d.extTTR,0)/included.filter(d=>d.extTTR!==null).length:null;
   const below60=included.filter(d=>d.ttr<60);
   const above60=included.filter(d=>d.ttr>=60);
 
-  // Factor analysis for below-60
+  // ── Section A: Per-patient breakdown of those below 60% ──
+  const ptRows=below60.sort((a,b)=>a.ttr-b.ttr).map((d,i)=>{
+    const topFactors=Object.entries(d.ptFactors).sort((a,b)=>b[1]-a[1]);
+    const factorCount=topFactors.length;
+    const multipleFactors=factorCount>=2;
+    const narrowNote=d.narrowRange?'<span style="color:#A8631B;font-weight:600;" title="Narrow therapeutic range ≤0.5">⚠ Narrow range</span>':'';
+    const factorHtml=topFactors.length
+      ? topFactors.map(([f,n])=>`<span style="display:inline-block;background:#FEE;border:1px solid #F5C6C6;border-radius:4px;padding:1px 6px;font-size:11px;margin:2px;">${escapeHtml(f)} (×${n})</span>`).join(' ')
+      : '<span style="color:#999;font-size:11px;">None recorded</span>';
+    const ttrCls=d.ttr<60?'bad':'good';
+    return `<tr>
+      <td style="font-weight:600;">${i+1}. ${escapeHtml(d.p.name)}</td>
+      <td style="font-family:monospace;font-size:11px;">${escapeHtml(d.p.mrn)}</td>
+      <td style="font-size:11px;">${escapeHtml(d.p.indication||'—')}</td>
+      <td style="text-align:center;">${d.p.targetLow}–${d.p.targetHigh} ${narrowNote}</td>
+      <td style="text-align:center;"><span class="badge ${ttrCls}">${d.ttr.toFixed(1)}%</span></td>
+      <td style="text-align:center;">${multipleFactors?'<b style="color:#8C2F26;">'+factorCount+' factors</b>':'<span style="color:#666;">'+factorCount+'</span>'}</td>
+      <td>${factorHtml}</td>
+    </tr>`;
+  }).join('');
+
+  // ── Section B: Factor frequency among below-60% patients ──
   const fCounts={};
-  for(const d of below60) for(const v of d.visits) for(const f of (v.factors||[])) if(f!=="No significant factor detected"){ fCounts[f]=(fCounts[f]||0)+1; }
+  for(const d of below60) for(const f of Object.keys(d.ptFactors)) fCounts[f]=(fCounts[f]||0)+d.ptFactors[f];
   const fList=Object.entries(fCounts).sort((a,b)=>b[1]-a[1]);
 
-  // ── Clinic-level improvement suggestions (Change 8) ──
-  const suggestions=[];
+  // Factor → how many unique patients affected
+  const fPatientCounts={};
+  for(const d of below60) for(const f of Object.keys(d.ptFactors)){fPatientCounts[f]=(fPatientCounts[f]||0)+1;}
 
-  if(avgTTR!==null && avgTTR<60){
-    suggestions.push('<b>Overall clinic TTR is below 60%.</b> This falls short of the recommended quality threshold. A systematic review of contributing factors and clinic processes is recommended.');
-  }
+  const fRows=fList.map(([f,n])=>{
+    const pts=fPatientCounts[f]||0;
+    const pct=below60.length?Math.round(pts/below60.length*100):0;
+    const barW=fList[0]?Math.round(n/fList[0][1]*100):0;
+    return `<tr>
+      <td>${escapeHtml(f)}</td>
+      <td style="text-align:center;">${pts} patient${pts!==1?'s':''} (${pct}%)</td>
+      <td style="text-align:center;">${n} visit${n!==1?'s':''}</td>
+      <td style="min-width:120px;"><div style="background:#EEE;border-radius:4px;height:8px;"><div style="background:#8C2F26;border-radius:4px;height:8px;width:${barW}%;"></div></div></td>
+    </tr>`;
+  }).join('');
 
-  // Most common factor across ALL patients
-  const allFCounts={};
-  for(const d of included) for(const v of d.visits) for(const f of (v.factors||[])) if(f!=="No significant factor detected"){ allFCounts[f]=(allFCounts[f]||0)+1; }
-  const topFactor=Object.entries(allFCounts).sort((a,b)=>b[1]-a[1])[0];
-  if(topFactor){
-    const factorAdvice={
-      "Non-compliance to regime": "Consider structured patient education at every visit, provide written warfarin diary/cards, encourage use of pill organisers or reminder apps. Screen for barriers to compliance (cost, complexity, side effects).",
-      "Diet changes": "Provide patients with a written guide on vitamin K-rich foods and the importance of dietary consistency (not avoidance). Reinforce that sudden changes in diet — not the absolute amount — affect INR.",
-      "Drug / supplement interaction": "Implement a routine medication reconciliation checklist at each visit. Educate patients to inform the warfarin clinic of any new prescription, OTC medication, or supplement before starting.",
-      "Changes in medical condition": "Acute illness, fever, diarrhoea, and organ dysfunction all affect warfarin metabolism. Ensure patients know to contact the clinic when unwell and consider more frequent monitoring during intercurrent illness.",
-      "Changes in lifestyle (alcohol/smoking)": "Consistent moderate alcohol intake is preferable to binge drinking. Smoking affects warfarin metabolism; changes in smoking status should prompt INR re-check. Include lifestyle screening at every visit.",
-      "Changes in physical activities": "Significant changes in physical activity can affect vitamin K turnover and warfarin requirements. Advise patients to inform the clinic of major lifestyle changes.",
-      "Others": "Review free-text notes for recurring themes and consider adding new factor categories to capture clinic-specific patterns."
-    };
-    const advice=factorAdvice[topFactor[0]]||"Review this factor across patients and develop targeted counselling materials.";
-    suggestions.push(`<b>Most common contributing factor clinic-wide: "${topFactor[0]}" (${topFactor[1]} occurrences).</b> ${advice}`);
-  }
+  // ── Section C: Multiple-factor patients ──
+  const multiPts=below60.filter(d=>Object.keys(d.ptFactors).length>=2).sort((a,b)=>Object.keys(b.ptFactors).length-Object.keys(a.ptFactors).length);
+  const multiRows=multiPts.map(d=>{
+    const factors=Object.entries(d.ptFactors).sort((a,b)=>b[1]-a[1]).map(([f,n])=>f+(n>1?' (×'+n+')':'')).join('; ');
+    return `<tr>
+      <td style="font-weight:600;">${escapeHtml(d.p.name)}</td>
+      <td style="font-family:monospace;font-size:11px;">${escapeHtml(d.p.mrn)}</td>
+      <td style="text-align:center;"><span class="badge bad">${d.ttr.toFixed(1)}%</span></td>
+      <td style="text-align:center;"><b style="color:#8C2F26;">${Object.keys(d.ptFactors).length}</b></td>
+      <td style="font-size:12px;">${escapeHtml(factors)}</td>
+    </tr>`;
+  }).join('');
 
-  // Defaulter burden
-  const defaulters=ttrData.filter(d=>{
-    const s=getPatientStatus(d.visits);
-    return s.type==='defaulter';
-  });
-  if(defaulters.length>0){
-    const pct=Math.round(defaulters.length/ttrData.length*100);
-    suggestions.push(`<b>${defaulters.length} patient${defaulters.length>1?'s':''} (${pct}%) are currently defaulting.</b> Missed appointments directly reduce TTR quality. Implement a proactive recall system — SMS reminders, phone calls 2–3 days before TCA, and a formal follow-up protocol for missed appointments.`);
-  }
+  // ── Section D: Narrow range patients ──
+  const narrowPts=ttrData.filter(d=>d.narrowRange&&!d.p.ttrExcluded);
+  const narrowRows=narrowPts.sort((a,b)=>(a.ttr??-1)-(b.ttr??-1)).map(d=>{
+    const cls=d.ttr===null?'warn':(d.ttr<60?'bad':'good');
+    return `<tr>
+      <td style="font-weight:600;">${escapeHtml(d.p.name)}</td>
+      <td style="font-family:monospace;font-size:11px;">${escapeHtml(d.p.mrn)}</td>
+      <td style="font-size:11px;">${escapeHtml(d.p.indication||'—')}</td>
+      <td style="text-align:center;">${d.p.targetLow}–${d.p.targetHigh}</td>
+      <td style="text-align:center;"><span class="badge ${cls}">${d.ttr===null?'—':d.ttr.toFixed(1)+'%'}</span></td>
+      <td style="text-align:center;"><span class="badge ${d.extTTR===null?'warn':(d.extTTR<60?'bad':'good')}">${d.extTTR===null?'—':d.extTTR.toFixed(1)+'%'}</span></td>
+      <td style="font-size:12px;">${Object.keys(d.ptFactors).length>0?Object.keys(d.ptFactors).join(', '):'None recorded'}</td>
+    </tr>`;
+  }).join('');
 
-  // Patients with no visit in current year
-  const thisYear=new Date().getFullYear();
-  const noVisitThisYear=ttrData.filter(d=>!d.visits.some(v=>v.date&&new Date(v.date).getFullYear()===thisYear));
-  if(noVisitThisYear.length>0){
-    suggestions.push(`<b>${noVisitThisYear.length} active patient${noVisitThisYear.length>1?'s have':' has'} no MTAC visit recorded in ${thisYear}.</b> Schedule these patients for review as a priority to maintain data quality and ensure ongoing anticoagulation safety.`);
-  }
-
-  // Fewer than 3 readings
-  const fewReadings=ttrData.filter(d=>d.visits.filter(v=>v.date&&v.inr).length<3);
-  if(fewReadings.length>0){
-    suggestions.push(`<b>${fewReadings.length} patient${fewReadings.length>1?'s have':' has'} fewer than 3 INR readings.</b> TTR calculated from fewer than 3 data points has limited reliability. Prioritise these patients for follow-up to build a meaningful TTR dataset.`);
-  }
-
-  // Trend compared across years for clinic
-  const yearAvgs={};
-  for(const d of included){
-    for(const [yr,v] of Object.entries(d.byYear||{})){
-      if(v===null) continue;
-      if(!yearAvgs[yr]) yearAvgs[yr]={sum:0,n:0};
-      yearAvgs[yr].sum+=v; yearAvgs[yr].n++;
-    }
-  }
-  const yrKeys=Object.keys(yearAvgs).sort();
-  if(yrKeys.length>=2){
-    const last=yearAvgs[yrKeys[yrKeys.length-1]].sum/yearAvgs[yrKeys[yrKeys.length-1]].n;
-    const prev=yearAvgs[yrKeys[yrKeys.length-2]].sum/yearAvgs[yrKeys[yrKeys.length-2]].n;
-    const diff=last-prev;
-    if(diff<=-3) suggestions.push(`<b>Clinic-average TTR has declined by ${Math.abs(diff).toFixed(1)}% from ${yrKeys[yrKeys.length-2]} to ${yrKeys[yrKeys.length-1]}.</b> A targeted quality improvement review is recommended. Examine whether patient panel composition has changed or new common factors have emerged.`);
-    else if(diff>=3) suggestions.push(`<b>Clinic-average TTR has improved by ${diff.toFixed(1)}% from ${yrKeys[yrKeys.length-2]} to ${yrKeys[yrKeys.length-1]}.</b> Maintain current practices and continue monitoring.`);
-  }
-
-  if(suggestions.length===0) suggestions.push('Clinic TTR is within the acceptable range. Continue current patient education and monitoring practices.');
-
-  const suggHtml='<ol style="padding-left:20px;line-height:1.8;">'+suggestions.map(s=>'<li style="margin-bottom:8px;">'+s+'</li>').join('')+'</ol>';
-
-  const rows=ttrData.sort((a,b)=>{
-    if(a.ttr===null&&b.ttr!==null) return 1;
-    if(a.ttr!==null&&b.ttr===null) return -1;
-    if(a.ttr===null&&b.ttr===null) return 0;
-    return a.ttr-b.ttr;
+  // ── Section E: Summary table all patients ──
+  const allRows=ttrData.sort((a,b)=>{
+    if(a.ttr===null&&b.ttr!==null)return 1;
+    if(b.ttr===null&&a.ttr!==null)return -1;
+    return (a.ttr??0)-(b.ttr??0);
   }).map(d=>{
     const cls=d.ttr===null?'warn':(d.ttr<60?'bad':'good');
     const excls=d.extTTR===null?'warn':(d.extTTR<60?'bad':'good');
-    const flagMark=d.flags.length?'<span title="'+escapeHtml(d.flags.join(' | '))+'" style="color:#A8631B;font-weight:700;">⚑</span>':'';
+    const flagMark=d.flags.length?`<span title="${escapeHtml(d.flags.join(' | '))}" style="color:#A8631B;font-weight:700;">⚑</span>`:'';
+    const narrow=d.narrowRange?'<span style="color:#A8631B;font-size:10px;">⚠ Narrow</span>':'';
     const excl=d.p.ttrExcluded?'<span class="badge warn">Excl.</span>':'';
-    // Year TTR mini
-    const yrMini=Object.entries(d.byYear||{}).sort(([a],[b])=>a.localeCompare(b)).map(([yr,v])=>
-      yr+': '+(v===null?'—':v.toFixed(1)+'%')
-    ).join(' | ');
+    const yrMini=Object.entries(d.byYear||{}).sort().map(([yr,v])=>yr+': '+(v===null?'—':v.toFixed(1)+'%')).join(' | ');
+    const topFactor=Object.entries(d.ptFactors).sort((a,b)=>b[1]-a[1])[0];
     return `<tr>
       <td>${escapeHtml(d.p.name)} ${flagMark}</td>
-      <td>${escapeHtml(d.p.mrn)}</td>
-      <td>${escapeHtml(d.p.indication||'—')}</td>
-      <td>${d.p.targetLow}–${d.p.targetHigh}</td>
-      <td><span class="badge ${cls}">${d.ttr===null?'—':d.ttr.toFixed(1)+'%'}</span></td>
-      <td><span class="badge ${excls}">${d.extTTR===null?'—':d.extTTR.toFixed(1)+'%'}</span></td>
-      <td style="font-size:11px;color:#666;">${yrMini||'—'}</td>
+      <td style="font-family:monospace;font-size:11px;">${escapeHtml(d.p.mrn)}</td>
+      <td style="font-size:11px;">${escapeHtml(d.p.indication||'—')}</td>
+      <td style="text-align:center;">${d.p.targetLow}–${d.p.targetHigh} ${narrow}</td>
+      <td style="text-align:center;"><span class="badge ${cls}">${d.ttr===null?'—':d.ttr.toFixed(1)+'%'}</span></td>
+      <td style="text-align:center;"><span class="badge ${excls}">${d.extTTR===null?'—':d.extTTR.toFixed(1)+'%'}</span></td>
+      <td style="font-size:11px;color:#555;">${yrMini||'—'}</td>
+      <td style="font-size:11px;">${topFactor?escapeHtml(topFactor[0]+' (×'+topFactor[1]+')'):'—'}</td>
       <td>${escapeHtml(d.status.label)}</td>
       <td>${d.visits.filter(v=>v.inr).length}</td>
       <td>${excl}</td>
     </tr>`;
   }).join('');
 
-  const fRows=fList.map(([f,n])=>`<tr><td>${escapeHtml(f)}</td><td>${n}</td></tr>`).join('');
+  // ── Improvement suggestions ──
+  const suggestions=[];
+  if(avgTTR!==null&&avgTTR<60) suggestions.push('<b>Overall clinic TTR is below 60%.</b> A systematic review of contributing factors and clinic processes is recommended.');
+  const allFCounts={};
+  for(const d of included) for(const f of Object.keys(d.ptFactors)) allFCounts[f]=(allFCounts[f]||0)+d.ptFactors[f];
+  const topFactor=Object.entries(allFCounts).sort((a,b)=>b[1]-a[1])[0];
+  const factorAdvice={"Non-compliance to regime":"Consider structured patient education, written warfarin diary/cards, pill organisers, or reminder apps. Screen for barriers to compliance.","Diet changes":"Provide a written guide on vitamin K-rich foods and the importance of dietary consistency. Reinforce that sudden changes — not absolute amount — affect INR.","Drug / supplement interaction":"Implement routine medication reconciliation at each visit. Educate patients to report any new prescription, OTC medication, or supplement.","Changes in medical condition":"Ensure patients know to contact the clinic when unwell. Consider more frequent monitoring during intercurrent illness.","Changes in lifestyle (alcohol/smoking)":"Include lifestyle screening at every visit. Advise on consistent alcohol intake and the effect of smoking status changes on warfarin metabolism.","Changes in physical activities":"Advise patients to inform the clinic of major lifestyle changes that may affect vitamin K turnover."};
+  if(topFactor) suggestions.push(`<b>Most common contributing factor: "${topFactor[0]}" (${topFactor[1]} occurrences across clinic).</b> ${factorAdvice[topFactor[0]]||'Review this factor and develop targeted counselling materials.'}`);
+  if(multiPts.length) suggestions.push(`<b>${multiPts.length} below-60% patient${multiPts.length>1?'s have':' has'} multiple contributing factors.</b> These patients are at highest risk of persistent poor control. Consider more frequent follow-up and a structured medication review.`);
+  if(narrowPts.filter(d=>d.ttr!==null&&d.ttr<60).length) suggestions.push(`<b>${narrowPts.filter(d=>d.ttr!==null&&d.ttr<60).length} patient${narrowPts.filter(d=>d.ttr!==null&&d.ttr<60).length>1?'s have':' has'} a narrow therapeutic range (≤0.5) and TTR below 60%.</b> Narrow ranges are inherently harder to maintain. Consider extended TTR (±0.2) as a supplementary quality metric for these patients, and ensure more frequent monitoring intervals.`);
+  const defaulters=ttrData.filter(d=>getPatientStatus(d.visits).type==='defaulter');
+  if(defaulters.length) suggestions.push(`<b>${defaulters.length} patient${defaulters.length>1?'s are':' is'} currently defaulting.</b> Missed appointments directly reduce TTR quality. Implement a proactive recall system with SMS reminders and a formal follow-up protocol.`);
+  const thisYear=new Date().getFullYear();
+  const noVisit=ttrData.filter(d=>!d.visits.some(v=>v.date&&new Date(v.date).getFullYear()===thisYear));
+  if(noVisit.length) suggestions.push(`<b>${noVisit.length} active patient${noVisit.length>1?'s have':' has'} no MTAC visit in ${thisYear}.</b> Schedule these patients for review as a priority.`);
+  const yearAvgs={};
+  for(const d of included) for(const[yr,v]of Object.entries(d.byYear||{})){ if(v===null)continue; if(!yearAvgs[yr])yearAvgs[yr]={sum:0,n:0}; yearAvgs[yr].sum+=v; yearAvgs[yr].n++; }
+  const yrKeys=Object.keys(yearAvgs).sort();
+  if(yrKeys.length>=2){const last=yearAvgs[yrKeys[yrKeys.length-1]].sum/yearAvgs[yrKeys[yrKeys.length-1]].n,prev=yearAvgs[yrKeys[yrKeys.length-2]].sum/yearAvgs[yrKeys[yrKeys.length-2]].n,diff=last-prev;if(diff<=-3)suggestions.push(`<b>Clinic-average TTR declined by ${Math.abs(diff).toFixed(1)}% from ${yrKeys[yrKeys.length-2]} to ${yrKeys[yrKeys.length-1]}.</b> A targeted quality improvement review is recommended.`);else if(diff>=3)suggestions.push(`<b>Clinic-average TTR improved by ${diff.toFixed(1)}% from ${yrKeys[yrKeys.length-2]} to ${yrKeys[yrKeys.length-1]}.</b> Maintain current practices.`);}
+  if(!suggestions.length) suggestions.push('Clinic TTR is within the acceptable range. Continue current patient education and monitoring practices.');
+  const suggHtml='<ol style="padding-left:20px;line-height:1.9;">'+suggestions.map(s=>'<li style="margin-bottom:10px;">'+s+'</li>').join('')+'</ol>';
 
-  // Yearly clinic average table
-  const yrAvgRows=yrKeys.map(yr=>{
-    const avg=yearAvgs[yr].sum/yearAvgs[yr].n;
-    return `<tr><td>${yr}</td><td><span class="badge ${avg<60?'bad':'good'}">${avg.toFixed(1)}%</span></td><td>${yearAvgs[yr].n} patients</td></tr>`;
-  }).join('');
+  const yrAvgRows=yrKeys.map(yr=>{const avg=yearAvgs[yr].sum/yearAvgs[yr].n;return`<tr><td>${yr}</td><td><span class="badge ${avg<60?'bad':'good'}">${avg.toFixed(1)}%</span></td><td>${yearAvgs[yr].n} patients</td></tr>`;}).join('');
 
   const html=`
-    <h1>Warfarin Clinic TTR Report</h1>
-    <div class="meta">Generated: ${new Date().toLocaleDateString()} &nbsp;|&nbsp; Active patients: ${ttrData.length} &nbsp;|&nbsp; Included in average: ${included.length}</div>
-    <h2>Clinic Summary</h2>
-    <table><tr><th>Average TTR</th><th>Average Ext. TTR</th><th>Below 60%</th><th>Above 60%</th></tr>
+    <h1>Warfarin Clinic — TTR Analysis Report</h1>
+    <div class="meta">Generated: ${new Date().toLocaleDateString()} &nbsp;·&nbsp; Active patients: ${ttrData.length} &nbsp;·&nbsp; Included in average: ${included.length}</div>
+
+    <h2>1. Clinic Summary</h2>
+    <table><tr><th>Average TTR</th><th>Average Ext. TTR ±0.2</th><th>TTR ≥60% (achieved)</th><th>TTR &lt;60% (not achieved)</th><th>Insufficient data</th></tr>
     <tr>
       <td><span class="badge ${avgTTR===null?'warn':(avgTTR<60?'bad':'good')}">${avgTTR===null?'—':avgTTR.toFixed(1)+'%'}</span></td>
       <td><span class="badge ${avgExt===null?'warn':(avgExt<60?'bad':'good')}">${avgExt===null?'—':avgExt.toFixed(1)+'%'}</span></td>
-      <td><b>${below60.length}</b></td>
-      <td><b>${above60.length}</b></td>
+      <td><b style="color:#1E6B4E;">${above60.length} (${included.length?Math.round(above60.length/included.length*100):0}%)</b></td>
+      <td><b style="color:#8C2F26;">${below60.length} (${included.length?Math.round(below60.length/included.length*100):0}%)</b></td>
+      <td>${ttrData.length-included.length-(ttrData.filter(d=>d.p.ttrExcluded).length)}</td>
     </tr></table>
-    ${yrKeys.length>0?'<h3>Clinic-average TTR by year</h3><table><thead><tr><th>Year</th><th>Avg TTR</th><th>Patients</th></tr></thead><tbody>'+yrAvgRows+'</tbody></table>':''}
-    <h2>Recommendations to improve clinic TTR</h2>
-    ${suggHtml}
-    <h2>TTR &lt; 60% — Contributing Factors</h2>
-    ${fList.length?'<table><thead><tr><th>Factor</th><th>Frequency (visits)</th></tr></thead><tbody>'+fRows+'</tbody></table>':'<p>No factors recorded for below-60% patients.</p>'}
-    <h2>All Active Patients</h2>
-    <table><thead><tr><th>Name</th><th>MRN</th><th>Indication</th><th>Target INR</th><th>TTR</th><th>Ext. TTR</th><th>TTR by year</th><th>Status</th><th>Reviews</th><th>Note</th></tr></thead>
-    <tbody>${rows}</tbody></table>
-    <p style="font-size:11px;color:#888;margin-top:20px;">⚑ = special flags; hover for details. TTR by Rosendaal linear interpolation.</p>`;
+    ${yrKeys.length>0?'<h3>Clinic-average TTR by year</h3><table><thead><tr><th>Year</th><th>Average TTR</th><th>Patients included</th></tr></thead><tbody>'+yrAvgRows+'</tbody></table>':''}
 
-  printWindow(html,'TTR Clinic Report');
+    <h2>2. Patients not achieving TTR ≥60%</h2>
+    <p style="font-size:12px;color:#555;margin-bottom:10px;">${below60.length} of ${included.length} included patients have TTR below 60%. Sorted by TTR ascending (worst first). ⚠ Narrow range = therapeutic range width ≤0.5.</p>
+    ${below60.length?`<table><thead><tr><th>#</th><th>Patient</th><th>MRN</th><th>Indication</th><th>Target INR</th><th>TTR</th><th>No. of factors</th><th>Contributing factors recorded</th></tr></thead><tbody>${ptRows}</tbody></table>`:'<p>All patients are achieving TTR ≥60%.</p>'}
+
+    <h2>3. Factor analysis — patients with TTR &lt;60%</h2>
+    <p style="font-size:12px;color:#555;margin-bottom:10px;">Number of patients affected by each factor, and total visit-level occurrences across all reviews.</p>
+    ${fList.length?`<table><thead><tr><th>Contributing factor</th><th>Patients affected</th><th>Total occurrences (visits)</th><th>Frequency</th></tr></thead><tbody>${fRows}</tbody></table>`:'<p>No factors recorded for below-60% patients.</p>'}
+
+    <h2>4. Patients with multiple contributing factors</h2>
+    <p style="font-size:12px;color:#555;margin-bottom:10px;">${multiPts.length} below-60% patient${multiPts.length!==1?'s have':' has'} ≥2 contributing factors — these require the most intensive support.</p>
+    ${multiPts.length?`<table><thead><tr><th>Patient</th><th>MRN</th><th>TTR</th><th>No. factors</th><th>Factors (most frequent first)</th></tr></thead><tbody>${multiRows}</tbody></table>`:'<p>No patients with multiple contributing factors.</p>'}
+
+    <h2>5. Narrow therapeutic range patients (range ≤0.5)</h2>
+    <p style="font-size:12px;color:#555;margin-bottom:10px;">${narrowPts.length} patient${narrowPts.length!==1?'s have':' has'} a narrow target range. For these patients, the extended TTR (±0.2) is a more clinically appropriate quality metric, as strict adherence to a 0.5-wide range is inherently challenging.</p>
+    ${narrowPts.length?`<table><thead><tr><th>Patient</th><th>MRN</th><th>Indication</th><th>Target INR</th><th>TTR</th><th>Ext. TTR ±0.2</th><th>Main factors</th></tr></thead><tbody>${narrowRows}</tbody></table>`:'<p>No patients with narrow therapeutic range.</p>'}
+
+    <h2>6. Recommendations</h2>
+    ${suggHtml}
+
+    <h2>7. Full patient list</h2>
+    <table><thead><tr><th>Name</th><th>MRN</th><th>Indication</th><th>Target INR</th><th>TTR</th><th>Ext. TTR</th><th>TTR by year</th><th>Top factor</th><th>Status</th><th>Reviews</th><th></th></tr></thead>
+    <tbody>${allRows}</tbody></table>
+    <p style="font-size:11px;color:#888;margin-top:20px;">⚑ = special flags (hover). ⚠ Narrow = target range ≤0.5. TTR calculated by Rosendaal linear interpolation. Ext. TTR uses target range expanded by ±0.2.</p>`;
+
+  printWindow(html,'TTR Analysis Report');
 }
 
 async function generateAppointmentList(){
