@@ -1034,11 +1034,6 @@ async function renderReviewPanel(p){
         '<div class="field"><label>Current TWD (mg/week)</label><input id="rv_twd" type="number" step="0.5" value="'+escapeHtml(String(lastTwd))+'" onchange="onInrChange()"></div>'+
         '<div class="field"><label>INR result</label><input id="rv_inr" type="number" step="0.1" onchange="onInrChange()"></div>'+
       '</div>'+
-      '<div style="margin-bottom:12px;">'+
-        '<label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer;">'+
-          '<input type="checkbox" id="rv_inr_day_before" style="width:16px;height:16px;"> '+
-          'Remind patient to take blood for INR <b>1 day before next appointment</b></label>'+
-      '</div>'+
       '<div class="field" style="margin-bottom:6px;"><label>Factors if INR not in range (select all that apply)</label></div>'+
       '<div class="checklist">'+factorChecks+'</div>'+
       '<div id="ruleSuggestionBox"></div>'+
@@ -1088,6 +1083,11 @@ async function renderReviewPanel(p){
       '<div class="grid" style="margin-top:8px;">'+
         '<div class="field"><label>New TWD (mg/week)</label><input id="rv_new_twd" type="number" step="0.5" oninput="onNewTwdChange()"></div>'+
         '<div class="field"><label>Next appointment</label><input id="rv_next_appt" type="date"></div>'+
+        '<div class="field" style="justify-content:flex-end; padding-top:4px;">'+
+          '<label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; margin-top:20px;">'+
+            '<input type="checkbox" id="rv_inr_day_before" style="width:16px;height:16px;"> INR 1 day before'+
+          '</label>'+
+        '</div>'+
       '</div>'+
       '<div class="regime-section" style="margin-top:14px;">'+
         '<b style="font-size:13px;">Warfarin regime</b>'+
