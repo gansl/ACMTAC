@@ -95,6 +95,7 @@
   .modal{background:var(--card); border-radius:12px; padding:24px 28px; width:380px; max-width:90vw;}
   .modal h3{margin:0 0 14px; font-family:var(--serif); font-size:19px;}
   .suggestion-box{background:var(--good-soft); border:1px solid #BBD9CB; border-radius:9px; padding:12px 14px; font-size:13px; line-height:1.6; color:var(--good); margin-top:12px;}
+  .suggestion-box.adjust{background:#FEF3E7; border-color:#E8C98A; color:#7A4A0A;}
   .config-warning{background:var(--warn-soft); border:1px solid #E0BC8C; color:var(--warn); border-radius:10px; padding:14px 18px; font-size:13px; line-height:1.6; margin-bottom:20px;}
   /* TTR overview */
   .ttr-overview-header{display:flex; gap:14px; flex-wrap:wrap; margin-bottom:22px;}
@@ -152,7 +153,15 @@
   .overdue-mid{background:#F7E9D6; color:var(--warn);}
   .overdue-lo{background:#EFEAE0; color:#6B7A8C;}
   /* Status strip */
-  .patient-status-strip{display:flex; gap:10px; flex-wrap:wrap; align-items:center; background:#F0EDE4; border:1px solid #DCD7C9; border-radius:10px; padding:10px 14px; margin-bottom:18px; font-size:13px;}
+  .patient-status-strip{display:flex; gap:10px; flex-wrap:wrap; align-items:center; background:#F0EDE4; border:1px solid #DCD7C9; border-radius:10px; padding:10px 14px; margin-bottom:12px; font-size:13px;}
+  /* Passover notes */
+  .passover-bar{background:#FFFBEA; border:1.5px solid #E8C060; border-radius:10px; padding:12px 14px; margin-bottom:14px;}
+  .passover-bar-header{display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;}
+  .passover-bar-title{font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.7px; color:#7A5700;}
+  .passover-bar-edit{font-size:11.5px; color:#A8631B; cursor:pointer; font-weight:600; border:none; background:none; padding:0;}
+  .passover-bar-text{font-size:13px; color:#5A3D00; white-space:pre-wrap; line-height:1.55;}
+  .passover-bar-textarea{width:100%; border:1px solid #E8C060; border-radius:7px; padding:8px 10px; font-size:13px; font-family:var(--sans); resize:vertical; background:#FFFDF0; color:var(--ink);}
+  .passover-bar textarea:focus{outline:none; border-color:#A8631B;}
   .pstatus-tca{font-weight:600;}
   .pstatus-default{color:var(--accent); font-weight:700;}
   .pstatus-active{color:var(--good); font-weight:700;}
@@ -406,16 +415,16 @@ function setDbStatus(ok, msg){
 
 // ---------- data layer ----------
 function rowToPatient(r){
-  return {id:r.id, name:r.name, mrn:r.mrn, phone:r.phone||"", indication:r.indication||"", targetLow:r.target_low, targetHigh:r.target_high, duration:r.duration||"", notes:r.notes||"", initiationDate:r.initiation_date||"", isActive:r.is_active!==false, ttrExcluded:r.ttr_excluded||false, ttrExcludeReason:r.ttr_exclude_reason||""};
+  return {id:r.id, name:r.name, mrn:r.mrn, phone:r.phone||"", indication:r.indication||"", targetLow:r.target_low, targetHigh:r.target_high, duration:r.duration||"", notes:r.notes||"", passoverNotes:r.passover_notes||"", initiationDate:r.initiation_date||"", isActive:r.is_active!==false, ttrExcluded:r.ttr_excluded||false, ttrExcludeReason:r.ttr_exclude_reason||""};
 }
 function patientToRow(p){
-  return {id:p.id, name:p.name, mrn:p.mrn, phone:p.phone, indication:p.indication, target_low:p.targetLow, target_high:p.targetHigh, duration:p.duration, notes:p.notes||"", initiation_date:p.initiationDate||null, is_active:p.isActive!==false, ttr_excluded:p.ttrExcluded||false, ttr_exclude_reason:p.ttrExcludeReason||""};
+  return {id:p.id, name:p.name, mrn:p.mrn, phone:p.phone, indication:p.indication, target_low:p.targetLow, target_high:p.targetHigh, duration:p.duration, notes:p.notes||"", passover_notes:p.passoverNotes||"", initiation_date:p.initiationDate||null, is_active:p.isActive!==false, ttr_excluded:p.ttrExcluded||false, ttr_exclude_reason:p.ttrExcludeReason||""};
 }
 function rowToVisit(r){
-  return {id:r.id, date:r.date, twd:r.twd, inr:r.inr, factors:r.factors||[], factorNotes:r.factor_notes||{}, admitDate:r.admit_date||"", admitDx:r.admit_dx||"", planAction:r.plan_action, planDays:r.plan_days, planLoadMg:r.plan_load_mg, planSubAction:r.plan_sub_action||"", planSubPct:r.plan_sub_pct, newTwd:r.new_twd, nextAppt:r.next_appt||"", clinicalNote:r.clinical_note||"", regimeLabel:r.regime_label||"", inrDayBefore:r.inr_day_before||false, reviewer:r.reviewer||""};
+  return {id:r.id, date:r.date, twd:r.twd, inr:r.inr, factors:r.factors||[], factorNotes:r.factor_notes||{}, admitDate:r.admit_date||"", admitDx:r.admit_dx||"", planAction:r.plan_action, planDays:r.plan_days, planLoadMg:r.plan_load_mg, planSubAction:r.plan_sub_action||"", planSubPct:r.plan_sub_pct, newTwd:r.new_twd, nextAppt:r.next_appt||"", clinicalNote:r.clinical_note||"", regimeLabel:r.regime_label||"", inrDayBefore:r.inr_day_before||false, longerTca:r.longer_tca||false, reviewer:r.reviewer||""};
 }
 function visitToRow(v, patientId){
-  return {id:v.id, patient_id:patientId, date:v.date||null, twd:v.twd||null, inr:v.inr||null, factors:v.factors||[], factor_notes:v.factorNotes||{}, admit_date:v.admitDate||null, admit_dx:v.admitDx||null, plan_action:v.planAction||null, plan_days:v.planDays||null, plan_load_mg:v.planLoadMg||null, plan_sub_action:v.planSubAction||null, plan_sub_pct:v.planSubPct||null, new_twd:v.newTwd||null, next_appt:v.nextAppt||null, clinical_note:v.clinicalNote||null, regime_label:v.regimeLabel||null, inr_day_before:v.inrDayBefore||false, reviewer:v.reviewer||null};
+  return {id:v.id, patient_id:patientId, date:v.date||null, twd:v.twd||null, inr:v.inr||null, factors:v.factors||[], factor_notes:v.factorNotes||{}, admit_date:v.admitDate||null, admit_dx:v.admitDx||null, plan_action:v.planAction||null, plan_days:v.planDays||null, plan_load_mg:v.planLoadMg||null, plan_sub_action:v.planSubAction||null, plan_sub_pct:v.planSubPct||null, new_twd:v.newTwd||null, next_appt:v.nextAppt||null, clinical_note:v.clinicalNote||null, regime_label:v.regimeLabel||null, inr_day_before:v.inrDayBefore||false, longer_tca:v.longerTca||false, reviewer:v.reviewer||null};
 }
 
 async function fetchPatients(){
@@ -622,7 +631,32 @@ function switchView(view){
   else renderSettingsView();
 }
 
-// ---------- Sidebar ----------
+function togglePassoverEdit(){
+  const editArea = document.getElementById("passoverEditArea");
+  const textArea = document.getElementById("passoverText");
+  const isEditing = editArea.style.display !== "none";
+  editArea.style.display = isEditing ? "none" : "block";
+  textArea.style.display = isEditing ? "block" : "none";
+  if(!isEditing){
+    const input = document.getElementById("passoverInput");
+    if(input){ input.focus(); input.selectionStart = input.value.length; }
+  }
+}
+
+async function savePassoverNotes(){
+  const p = patients.find(x=>x.id===currentPatientId);
+  if(!p) return;
+  const val = document.getElementById("passoverInput")?.value.trim()||"";
+  p.passoverNotes = val;
+  await upsertPatientRow(p, true);
+  // Update display inline without full re-render
+  const textEl = document.getElementById("passoverText");
+  if(textEl) textEl.innerHTML = val
+    ? escapeHtml(val)
+    : '<span style="color:#B8A060;font-style:italic;">No passover notes. Click Edit to add alerts or handover information for this patient.</span>';
+  togglePassoverEdit();
+  showToast("Passover notes saved ✓","success",2000);
+}
 function getPatientStatus(visits){
   const today = new Date(); today.setHours(0,0,0,0);
   const sorted = [...visits].filter(v=>v.date).sort((a,b)=>new Date(b.date)-new Date(a.date));
@@ -893,17 +927,37 @@ async function renderMain(){
     alertHtml = '<div class="alert-banner"><span>&#9888;</span><div><b>Low TTR alert.</b> Time-in-therapeutic-range is '+ttr.toFixed(1)+'%, below the 60% quality threshold.</div></div>';
   }
 
+  // Passover notes banner
+  const passoverText = p.passoverNotes
+    ? escapeHtml(p.passoverNotes)
+    : '<span style="color:#B8A060;font-style:italic;">No passover notes. Click Edit to add alerts or handover information for this patient.</span>';
+  const passoverHtml =
+    '<div class="passover-bar" id="passoverBar">'+
+      '<div class="passover-bar-header">'+
+        '<span class="passover-bar-title">📋 Passover notes</span>'+
+        '<button class="passover-bar-edit" onclick="togglePassoverEdit()">Edit</button>'+
+      '</div>'+
+      '<div class="passover-bar-text" id="passoverText">'+passoverText+'</div>'+
+      '<div id="passoverEditArea" style="display:none; margin-top:8px;">'+
+        '<textarea class="passover-bar-textarea" id="passoverInput" rows="3" placeholder="Add handover notes, special history, alerts for next reviewer…">'+escapeHtml(p.passoverNotes||'')+'</textarea>'+
+        '<div style="display:flex; gap:8px; justify-content:flex-end; margin-top:6px;">'+
+          '<button class="btn" style="font-size:12px; padding:5px 12px;" onclick="togglePassoverEdit()">Cancel</button>'+
+          '<button class="btn btn-primary" style="font-size:12px; padding:5px 14px;" onclick="savePassoverNotes()">Save</button>'+
+        '</div>'+
+      '</div>'+
+    '</div>';
+
   main.innerHTML =
     '<div class="patient-header">'+
       '<div><h1>'+escapeHtml(p.name)+'</h1><div class="meta">MRN '+escapeHtml(p.mrn)+(p.indication?' &middot; '+escapeHtml(p.indication):'')+'</div></div>'+
       '<div class="header-stats">'+
         '<div class="stat-box '+(ttr===null?'':(ttr<60?'alert':'ok'))+'"><div class="label">TTR</div><div class="value">'+(ttr===null?'--':ttr.toFixed(1)+'%')+'</div></div>'+
         '<div class="stat-box hide-mobile" title="Extended TTR: target range expanded ±0.2"><div class="label">Ext. TTR ±0.2</div><div class="value" style="font-size:18px;">'+(extTTR===null?'--':extTTR.toFixed(1)+'%')+'</div></div>'+
-        '<div class="stat-box hide-mobile"><div class="label">Target INR</div><div class="value">'+(p.targetLow??'--')+'&ndash;'+(p.targetHigh??'--')+'</div></div>'+
+        '<div class="stat-box"><div class="label">Target INR</div><div class="value">'+(p.targetLow??'--')+'&ndash;'+(p.targetHigh??'--')+'</div></div>'+
         '<div class="stat-box"><div class="label">Last INR</div><div class="value">'+(lastVisit?lastVisit.inr:'--')+'</div></div>'+
       '</div>'+
     '</div>'+
-    statusStrip+flagsHtml+alertHtml+
+    statusStrip+passoverHtml+flagsHtml+alertHtml+
     '<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:4px;">'+
       '<div class="tabs" style="margin-bottom:0; border-bottom:none;">'+tabBtn('profile','Patient info')+tabBtn('review','New review')+tabBtn('history','History & TTR')+'</div>'+
       '<button class="btn" style="font-size:12px; padding:6px 14px;" onclick="generatePatientReport()">⬇ Patient report</button>'+
@@ -1087,6 +1141,9 @@ async function renderReviewPanel(p){
           '<label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; margin-top:20px;">'+
             '<input type="checkbox" id="rv_inr_day_before" style="width:16px;height:16px;"> INR 1 day before'+
           '</label>'+
+          '<label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; margin-top:8px;">'+
+            '<input type="checkbox" id="rv_longer_tca" style="width:16px;height:16px;"> Patient requests longer TCA'+
+          '</label>'+
         '</div>'+
       '</div>'+
       '<div class="regime-section" style="margin-top:14px;">'+
@@ -1134,7 +1191,8 @@ async function onInrChange(pArg){
   if(isNaN(inrVal)){ box.innerHTML = ""; return; }
   const rules = await getRules();
   const sug = getRuleSuggestion(inrVal, parseFloat(p.targetLow), parseFloat(p.targetHigh), rules, twdVal);
-  box.innerHTML = sug ? '<div class="suggestion-box"><b>Rule-based suggestion:</b> '+escapeHtml(sug.text)+'</div>' : "";
+  const isAdjust = sug && sug.tone !== "good";
+  box.innerHTML = sug ? '<div class="suggestion-box'+(isAdjust?' adjust':'')+'"><b>Rule-based suggestion:</b> '+escapeHtml(sug.text)+'</div>' : "";
 }
 
 function onPlanChange(){
@@ -1272,12 +1330,13 @@ async function saveReview(){
   }
 
   const inrDayBefore = document.getElementById("rv_inr_day_before")?.checked||false;
+  const longerTca = document.getElementById("rv_longer_tca")?.checked||false;
 
   const visitId = editingVisitId || ("v_"+Date.now());
   const visit = {
     id: visitId, date,
     twd: document.getElementById("rv_twd").value,
-    inr, factors, factorNotes, inrDayBefore,
+    inr, factors, factorNotes, inrDayBefore, longerTca,
     admitDate: document.getElementById("rv_admit_date").value,
     admitDx: document.getElementById("rv_admit_dx").value.trim(),
     planAction, planDays, planLoadMg, planSubAction, planSubPct,
@@ -1376,7 +1435,7 @@ function renderHistoryPanel(p, visits, ttr, extTTR){
         '<td>'+(factorsHtml||'<span style="color:var(--ink-soft);">&mdash;</span>')+'</td>'+
         '<td>'+admitHtml+'</td>'+
         '<td>'+escapeHtml(planLabel(v))+'<br><span style="font-size:11px; color:var(--ink-soft);">New TWD '+(v.newTwd||'--')+'mg</span>'+(v.regimeLabel?'<br><span style="font-size:11px; color:var(--ink-soft); font-style:italic;">'+escapeHtml(v.regimeLabel)+'</span>':'')+'</td>'+
-        '<td>'+(v.nextAppt||'<span style="color:var(--ink-soft);">&mdash;</span>')+'</td>'+
+        '<td>'+(v.nextAppt||'<span style="color:var(--ink-soft);">&mdash;</span>')+(v.longerTca?' <span class="tag" style="background:#FEF3E7; color:#7A4A0A;">longer TCA</span>':'')+'</td>'+
         '<td style="font-size:11.5px; color:var(--ink-soft);">'+escapeHtml(v.reviewer||'—')+'</td>'+
       '</tr>';
     }
@@ -1438,6 +1497,8 @@ async function editReview(visitId){
   }
   const inrEl = document.getElementById("rv_inr_day_before");
   if(inrEl) inrEl.checked = v.inrDayBefore||false;
+  const longerEl = document.getElementById("rv_longer_tca");
+  if(longerEl) longerEl.checked = v.longerTca||false;
   selectedRegimeLabel = v.regimeLabel||"";
   // Update save button label
   const btn=document.getElementById("saveReviewBtn"); if(btn) btn.innerText="Update review";
@@ -2054,6 +2115,7 @@ async function generatePatientReport(patientId){
     <div class="meta">Generated: ${new Date().toLocaleDateString()} &nbsp;|&nbsp; MRN: ${escapeHtml(p.mrn)} &nbsp;|&nbsp; ${escapeHtml(p.indication||'—')} &nbsp;|&nbsp; Target INR: ${p.targetLow}–${p.targetHigh} &nbsp;|&nbsp; Duration: ${escapeHtml(p.duration||'—')}</div>
     <div class="meta" style="margin-top:4px;">Phone: ${escapeHtml(p.phone||'—')} &nbsp;|&nbsp; Initiation: ${escapeHtml(p.initiationDate||'—')} &nbsp;|&nbsp; Status: ${escapeHtml(status.label)}</div>
     ${p.notes?'<div class="flag" style="margin-top:8px;"><b>Clinical notes:</b><br>'+escapeHtml(p.notes).replace(/\n/g,'<br>')+'</div>':''}
+    ${p.passoverNotes?'<div class="flag" style="margin-top:8px; background:#FFFBEA; border-color:#E8C060; color:#5A3D00;"><b>📋 Passover notes:</b><br>'+escapeHtml(p.passoverNotes).replace(/\n/g,'<br>')+'</div>':''}
     <h2>TTR Summary</h2>
     <table><tr>
       <th>Overall TTR (${p.targetLow}–${p.targetHigh})</th>
