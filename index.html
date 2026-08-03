@@ -156,10 +156,13 @@
   .patient-status-strip{display:flex; gap:10px; flex-wrap:wrap; align-items:center; background:#F0EDE4; border:1px solid #DCD7C9; border-radius:10px; padding:10px 14px; margin-bottom:12px; font-size:13px;}
   /* Passover notes */
   .passover-bar{background:#FFFBEA; border:1.5px solid #E8C060; border-radius:10px; padding:12px 14px; margin-bottom:14px;}
+  .passover-bar.has-notes{background:#FFF3CD; border:2px solid #E6A800; border-radius:10px; padding:14px 16px; margin-bottom:14px; box-shadow:0 2px 8px rgba(230,168,0,0.18);}
   .passover-bar-header{display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;}
   .passover-bar-title{font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.7px; color:#7A5700;}
+  .passover-bar.has-notes .passover-bar-title{font-size:12px; color:#5A3D00;}
   .passover-bar-edit{font-size:11.5px; color:#A8631B; cursor:pointer; font-weight:600; border:none; background:none; padding:0;}
   .passover-bar-text{font-size:13px; color:#5A3D00; white-space:pre-wrap; line-height:1.55;}
+  .passover-bar.has-notes .passover-bar-text{font-size:13.5px; font-weight:500;}
   .passover-bar-textarea{width:100%; border:1px solid #E8C060; border-radius:7px; padding:8px 10px; font-size:13px; font-family:var(--sans); resize:vertical; background:#FFFDF0; color:var(--ink);}
   .passover-bar textarea:focus{outline:none; border-color:#A8631B;}
   .pstatus-tca{font-weight:600;}
@@ -649,9 +652,15 @@ async function savePassoverNotes(){
   const val = document.getElementById("passoverInput")?.value.trim()||"";
   p.passoverNotes = val;
   await upsertPatientRow(p, true);
-  // Update display inline without full re-render
+  const bar = document.getElementById("passoverBar");
   const textEl = document.getElementById("passoverText");
-  if(textEl) textEl.innerHTML = val
+  const titleEl = bar?.querySelector(".passover-bar-title");
+  const editBtn = bar?.querySelector(".passover-bar-edit");
+  const hasNotes = !!val;
+  if(bar){ bar.className = "passover-bar"+(hasNotes?" has-notes":""); }
+  if(titleEl) titleEl.textContent = hasNotes ? "⚠ 📋 Passover notes" : "📋 Passover notes";
+  if(editBtn) editBtn.textContent = hasNotes ? "✏ Edit" : "Edit";
+  if(textEl) textEl.innerHTML = hasNotes
     ? escapeHtml(val)
     : '<span style="color:#B8A060;font-style:italic;">No passover notes. Click Edit to add alerts or handover information for this patient.</span>';
   togglePassoverEdit();
@@ -696,6 +705,7 @@ async function renderPatientList(){
     row.innerHTML = '<div class="pname">'+escapeHtml(p.name)+
       (p.isActive===false?'<span class="status-badge sb-inactive">Inactive</span>':'')+
       (p.ttrExcluded?'<span class="status-badge sb-excluded">Excl.</span>':'')+
+      (p.passoverNotes?'<span title="Has passover notes" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#E6A800;margin-left:5px;vertical-align:middle;"></span>':'')+
       '</div><div class="pmrn">'+escapeHtml(p.mrn)+'</div>'+
       '<div style="font-size:11px; color:'+statusColor+'; margin-top:3px;">'+escapeHtml(status.label)+'</div>'+pill;
     row.onclick = () => selectPatient(p.id);
@@ -928,14 +938,15 @@ async function renderMain(){
   }
 
   // Passover notes banner
-  const passoverText = p.passoverNotes
+  const hasPassover = !!(p.passoverNotes && p.passoverNotes.trim());
+  const passoverText = hasPassover
     ? escapeHtml(p.passoverNotes)
     : '<span style="color:#B8A060;font-style:italic;">No passover notes. Click Edit to add alerts or handover information for this patient.</span>';
   const passoverHtml =
-    '<div class="passover-bar" id="passoverBar">'+
+    '<div class="passover-bar'+(hasPassover?' has-notes':'')+'" id="passoverBar">'+
       '<div class="passover-bar-header">'+
-        '<span class="passover-bar-title">📋 Passover notes</span>'+
-        '<button class="passover-bar-edit" onclick="togglePassoverEdit()">Edit</button>'+
+        '<span class="passover-bar-title">'+(hasPassover?'⚠ 📋 Passover notes':'📋 Passover notes')+'</span>'+
+        '<button class="passover-bar-edit" onclick="togglePassoverEdit()">'+(hasPassover?'✏ Edit':'Edit')+'</button>'+
       '</div>'+
       '<div class="passover-bar-text" id="passoverText">'+passoverText+'</div>'+
       '<div id="passoverEditArea" style="display:none; margin-top:8px;">'+
