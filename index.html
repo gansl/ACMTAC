@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>INR Clinic Tracker</title>
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -172,40 +173,132 @@
   .flag-list li{margin-bottom:4px;}
   /* Responsive mobile */
   @media(max-width:700px){
-    .app{flex-direction:column;}
-    .sidebar{width:100%; padding:12px 12px 6px; flex-shrink:0;}
-    .brand{font-size:17px;}
-    .nav-switch{margin-bottom:8px;}
-    .nav-btn{font-size:11px; padding:7px 4px;}
-    .search{margin-bottom:8px;}
-    .btn-add{padding:8px; font-size:12px; margin-bottom:8px;}
-    .patient-list{max-height:180px; overflow-y:auto;}
-    .main{padding:14px 12px; max-width:100%;}
-    .patient-header{flex-direction:column; gap:12px;}
+    /* ── Layout: sidebar becomes a slide-in drawer ── */
+    .app{flex-direction:column; min-height:100vh;}
+    .sidebar{
+      position:fixed; top:0; left:-100%; width:85%; max-width:320px; height:100%;
+      z-index:100; padding:16px 14px 80px; overflow-y:auto;
+      transition:left 0.25s ease; box-shadow:none;
+    }
+    .sidebar.open{left:0; box-shadow:4px 0 24px rgba(0,0,0,0.35);}
+    .sidebar-overlay{
+      position:fixed; inset:0; background:rgba(0,0,0,0.45); z-index:99;
+      display:none;
+    }
+    .sidebar-overlay.show{display:block;}
+    /* ── Bottom tab bar ── */
+    .mobile-tabbar{
+      display:flex; position:fixed; bottom:0; left:0; right:0;
+      background:var(--ink); border-top:1px solid #2C3C57;
+      z-index:90; height:58px; padding-bottom:env(safe-area-inset-bottom,0);
+    }
+    .mobile-tab{
+      flex:1; display:flex; flex-direction:column; align-items:center;
+      justify-content:center; font-size:10px; color:#8C99B2; cursor:pointer;
+      padding:6px 2px; gap:3px; border:none; background:none;
+    }
+    .mobile-tab.active{color:#D98A7E;}
+    .mobile-tab-icon{font-size:20px; line-height:1;}
+    .mobile-tab-menu{
+      flex:1; display:flex; flex-direction:column; align-items:center;
+      justify-content:center; font-size:10px; color:#8C99B2; cursor:pointer;
+      padding:6px 2px; gap:3px; border:none; background:none;
+    }
+    /* ── Main area: full width with bottom padding for tab bar ── */
+    .main{
+      padding:12px 14px 76px; max-width:100%; width:100%;
+      min-height:100vh;
+    }
+    /* ── Top header bar ── */
+    .mobile-topbar{
+      display:flex; align-items:center; justify-content:space-between;
+      background:var(--ink); color:#F1EEE5; padding:10px 14px;
+      position:sticky; top:0; z-index:80;
+    }
+    .mobile-topbar-title{font-family:var(--serif); font-size:17px; color:#F1EEE5;}
+    .mobile-topbar-title span{color:#D98A7E;}
+    .mobile-menu-btn{
+      background:none; border:none; color:#F1EEE5; font-size:22px;
+      cursor:pointer; padding:4px 6px; line-height:1;
+    }
+    /* ── Patient header: stack vertically ── */
+    .patient-header{flex-direction:column; gap:10px;}
+    .patient-header h1{font-size:20px;}
     .header-stats{flex-wrap:wrap; gap:8px;}
-    .stat-box{min-width:70px; padding:8px 10px;}
-    .stat-box .value{font-size:17px;}
+    .stat-box{min-width:72px; padding:8px 10px; flex:1;}
+    .stat-box .value{font-size:16px;}
+    .stat-box .label{font-size:9px;}
+    /* ── Cards and forms ── */
+    .card{padding:14px 14px;}
     .grid{grid-template-columns:1fr;}
     .grid3{grid-template-columns:1fr;}
-    .ttr-overview-header{gap:8px;}
-    .ttr-avg-box{padding:12px 16px; min-width:100px;}
-    .ttr-avg-box .av-value{font-size:24px;}
-    .defaulter-row{grid-template-columns:1fr; gap:6px;}
+    .span2{grid-column:span 1;}
+    .field input, .field select, .field textarea{
+      font-size:16px; /* prevents iOS zoom */
+      padding:11px 12px;
+    }
+    .field label{font-size:13px;}
+    /* ── Tabs ── */
+    .tabs{gap:0; overflow-x:auto; -webkit-overflow-scrolling:touch; flex-wrap:nowrap;}
+    .tab{font-size:12px; padding:10px 12px; white-space:nowrap;}
+    /* ── Buttons ── */
+    .btn, .btn-primary, .btn-danger{
+      padding:11px 16px; font-size:13.5px; min-height:44px;
+    }
+    .row-actions{flex-wrap:wrap; gap:8px;}
+    .row-actions .btn, .row-actions button{flex:1; min-width:120px;}
+    /* ── History table: horizontal scroll ── */
+    .card div.table-scroll{overflow-x:auto; -webkit-overflow-scrolling:touch;}
+    table.history{font-size:12px; min-width:600px;}
+    table.history th, table.history td{padding:7px 7px;}
     table.ttr-table{font-size:11.5px;}
     table.ttr-table th, table.ttr-table td{padding:6px 6px;}
-    table.history th, table.history td{padding:6px 6px; font-size:12px;}
-    .logout-row{padding-top:8px;}
-    .modal{width:96vw; padding:18px 14px;}
+    /* ── Passover banner ── */
+    .passover-bar{padding:12px 12px;}
+    .patient-status-strip{padding:8px 12px; font-size:12.5px;}
+    /* ── TTR overview ── */
+    .ttr-overview-header{flex-wrap:wrap; gap:8px;}
+    .ttr-avg-box{padding:12px 14px; min-width:110px;}
+    .ttr-avg-box .av-value{font-size:22px;}
+    .ttr-count-box{min-width:80px;}
+    /* ── Defaulter rows ── */
+    .defaulter-row{grid-template-columns:1fr; gap:8px;}
+    /* ── Modal ── */
+    .modal{width:94vw; padding:18px 14px; max-height:90vh; overflow-y:auto;}
+    /* ── Regime section ── */
+    .regime-section{padding:12px 12px;}
+    .regime-card{padding:10px 12px;}
+    /* ── Logout row ── */
+    .logout-row{padding-top:10px; margin-top:10px;}
+    /* ── DB status ── */
+    .db-status{margin-bottom:6px;}
   }
   @media(max-width:700px){
     .hide-mobile{display:none!important;}
+    /* Sidebar action buttons: hide bulk on mobile (accessible via sidebar drawer) */
+    .sidebar-reports-row, .sidebar-import-row{display:none;}
+  }
+  /* Desktop: hide mobile-only elements */
+  @media(min-width:701px){
+    .mobile-tabbar{display:none;}
+    .mobile-topbar{display:none;}
+    .sidebar-overlay{display:none;}
   }
 </style>
 </head>
 <body>
 
 <div class="app" id="appRoot" style="display:none;">
-  <div class="sidebar">
+  <!-- Mobile top bar (only visible on phone) -->
+  <div class="mobile-topbar">
+    <span class="mobile-topbar-title">INR<span>Clinic</span></span>
+    <button class="mobile-menu-btn" onclick="toggleSidebar()" aria-label="Menu">☰</button>
+  </div>
+
+  <!-- Sidebar overlay (tap to close on mobile) -->
+  <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+
+  <div class="sidebar" id="sidebar">
     <p class="brand">INR<span>Clinic</span></p>
     <p class="brand-sub">Anticoagulation tracker</p>
     <div class="nav-switch" style="flex-wrap:wrap; gap:5px;">
@@ -218,21 +311,21 @@
     <div class="db-status" id="dbStatus"><span class="db-dot pending" id="dbDot"></span><span id="dbStatusText">Checking…</span></div>
     <input class="search" id="searchBox" placeholder="Search name or MRN" oninput="renderPatientList()">
     <button class="btn-add" onclick="openNewPatientModal()">+ Add patient</button>
-    <div style="display:flex; gap:6px; margin-bottom:16px;">
+    <div class="sidebar-import-row" style="display:flex; gap:6px; margin-bottom:16px;">
       <button class="btn" style="flex:1; font-size:11.5px; padding:8px; background:#1E2E48; border-color:#2C3C57; color:#F1EEE5;" onclick="document.getElementById('csvFile').click()">Import CSV</button>
       <button class="btn" style="flex:1; font-size:11.5px; padding:8px; background:#1E2E48; border-color:#2C3C57; color:#F1EEE5;" onclick="downloadCsvTemplate()">Template</button>
     </div>
     <input type="file" id="csvFile" accept=".csv" style="display:none" onchange="handleCsvImport(event)">
-    <div style="display:flex; gap:6px; margin-bottom:10px;">
+    <div class="sidebar-import-row" style="display:flex; gap:6px; margin-bottom:10px;">
       <button class="btn" style="flex:1; font-size:11.5px; padding:8px; background:#1E2E48; border-color:#2C3C57; color:#F1EEE5;" onclick="exportData()">Export data</button>
       <button class="btn" style="flex:1; font-size:11.5px; padding:8px; background:#1E2E48; border-color:#2C3C57; color:#F1EEE5;" onclick="document.getElementById('jsonFile').click()">Import data</button>
     </div>
-    <div style="display:flex; gap:6px; margin-bottom:16px;">
+    <div class="sidebar-reports-row" style="display:flex; gap:6px; margin-bottom:16px;">
       <button class="btn" style="flex:1; font-size:11.5px; padding:8px; background:#1E2E48; border-color:#2C3C57; color:#F1EEE5;" onclick="generateTTRReport()">TTR report</button>
       <button class="btn" style="flex:1; font-size:11.5px; padding:8px; background:#1E2E48; border-color:#2C3C57; color:#F1EEE5;" onclick="generateAppointmentList()">Appt list</button>
-      <button class="btn" style="flex:1; font-size:11.5px; padding:8px; background:#1E6B4E; border-color:#1E6B4E; color:#fff;" onclick="exportAppointmentExcel()" title="Export appointment list to Excel">📊 Excel</button>
+      <button class="btn" style="flex:1; font-size:11.5px; padding:8px; background:#1E6B4E; border-color:#1E6B4E; color:#fff;" onclick="exportAppointmentExcel()">📊 Excel</button>
     </div>
-    <div style="display:flex; gap:6px; margin-bottom:16px;">
+    <div class="sidebar-reports-row" style="display:flex; gap:6px; margin-bottom:16px;">
       <button class="btn" style="flex:1; font-size:11.5px; padding:8px; background:#8C2F26; border-color:#8C2F26; color:#fff;" onclick="exportMissedAppointmentExcel()">📊 Missed Appt Excel</button>
     </div>
     <input type="file" id="jsonFile" accept=".json" style="display:none" onchange="handleJsonImport(event)">
@@ -244,6 +337,25 @@
   </div>
 
   <div class="main" id="main"></div>
+
+  <!-- Mobile bottom tab bar -->
+  <nav class="mobile-tabbar">
+    <button class="mobile-tab active" id="mTabPatients" onclick="mobileSwitchView('patients')">
+      <span class="mobile-tab-icon">👤</span>Patients
+    </button>
+    <button class="mobile-tab" id="mTabTTR" onclick="mobileSwitchView('ttr')">
+      <span class="mobile-tab-icon">📊</span>TTR
+    </button>
+    <button class="mobile-tab" id="mTabDefaulters" onclick="mobileSwitchView('defaulters')">
+      <span class="mobile-tab-icon">⏰</span>Defaulters
+    </button>
+    <button class="mobile-tab" id="mTabAnalysis" onclick="mobileSwitchView('analysis')">
+      <span class="mobile-tab-icon">📈</span>Analysis
+    </button>
+    <button class="mobile-tab" id="mTabMenu" onclick="toggleSidebar()">
+      <span class="mobile-tab-icon">☰</span>Menu
+    </button>
+  </nav>
 </div>
 
 <div class="login-screen" id="loginScreen">
@@ -396,6 +508,26 @@ function escapeHtml(s){
   const d = document.createElement("div");
   d.innerText = s == null ? "" : s;
   return d.innerHTML;
+}
+
+function toggleSidebar(){
+  const sidebar = document.getElementById("sidebar");
+  const overlay = document.getElementById("sidebarOverlay");
+  const isOpen = sidebar.classList.contains("open");
+  sidebar.classList.toggle("open", !isOpen);
+  overlay.classList.toggle("show", !isOpen);
+}
+
+function syncMobileTabs(view){
+  const map = {patients:'mTabPatients', ttr:'mTabTTR', defaulters:'mTabDefaulters', analysis:'mTabAnalysis'};
+  Object.values(map).forEach(id=>{ const el=document.getElementById(id); if(el) el.classList.remove("active"); });
+  if(map[view]){ const el=document.getElementById(map[view]); if(el) el.classList.add("active"); }
+}
+
+function mobileSwitchView(view){
+  document.getElementById("sidebar").classList.remove("open");
+  document.getElementById("sidebarOverlay").classList.remove("show");
+  switchView(view);
 }
 
 function showToast(msg, type='info', duration=4000){
@@ -627,6 +759,7 @@ function switchView(view){
   document.getElementById("navDefaulters").classList.toggle("active", view==="defaulters");
   document.getElementById("navAnalysis").classList.toggle("active", view==="analysis");
   document.getElementById("navSettings").classList.toggle("active", view==="settings");
+  syncMobileTabs(view);
   if(view==="patients") renderMain();
   else if(view==="ttr") renderTTROverview();
   else if(view==="defaulters") renderDefaultersView();
@@ -853,6 +986,11 @@ async function handleCsvImport(event){
 async function selectPatient(id){
   currentPatientId = id;
   currentTab = "profile";
+  // Close sidebar drawer on mobile
+  const sb = document.getElementById("sidebar");
+  const ov = document.getElementById("sidebarOverlay");
+  if(sb) sb.classList.remove("open");
+  if(ov) ov.classList.remove("show");
   switchView("patients");
   await renderPatientList();
   await renderMain();
@@ -1452,7 +1590,7 @@ function renderHistoryPanel(p, visits, ttr, extTTR){
     }
   }
 
-  el.innerHTML = ttrSummary+'<div class="card"><h3>Review history</h3><table class="history"><thead><tr><th>Date</th><th>INR / TWD</th><th>Factors</th><th>Ward admission</th><th>Plan</th><th>Next appt</th><th>Reviewer</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+  el.innerHTML = ttrSummary+'<div class="card"><h3>Review history</h3><div class="table-scroll"><table class="history"><thead><tr><th>Date</th><th>INR / TWD</th><th>Factors</th><th>Ward admission</th><th>Plan</th><th>Next appt</th><th>Reviewer</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
 }
 
 async function deleteReview(visitId){
