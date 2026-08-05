@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>INR Clinic Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Spectral:wght@500;600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
@@ -173,165 +175,120 @@
   .flag-list li{margin-bottom:4px;}
   /* Responsive mobile */
   @media(max-width:700px){
-    /* ── Layout: sidebar becomes a slide-in drawer ── */
-    .app{flex-direction:column; min-height:100vh;}
+    :root{
+      --m-navy:#12293D; --m-teal:#0E7C7B; --m-teal-dark:#0A5958;
+      --m-teal-tint:#DCEEEC; --m-green:#3F8F5F; --m-green-tint:#E4F1E7;
+      --m-amber:#C98A2E; --m-red:#B5423A; --m-red-tint:#F6E2DF;
+      --m-paper:#EEF2F1; --m-card:#FFFFFF; --m-slate:#5C6B72;
+      --m-mute:#93A0A3; --m-line:#DCE3E1;
+    }
+    body{background:var(--m-paper);}
+    .app{flex-direction:column; min-height:100vh; background:var(--m-paper);}
     .sidebar{
-      position:fixed; top:0; left:-100%; width:85%; max-width:320px; height:100%;
+      position:fixed; top:0; left:-100%; width:82%; max-width:310px; height:100%;
       z-index:100; padding:16px 14px 80px; overflow-y:auto;
-      transition:left 0.25s ease; box-shadow:none;
+      transition:left 0.22s ease; background:var(--m-navy); box-shadow:none;
     }
-    .sidebar.open{left:0; box-shadow:4px 0 24px rgba(0,0,0,0.35);}
-    .sidebar-overlay{
-      position:fixed; inset:0; background:rgba(0,0,0,0.45); z-index:99;
-      display:none;
-    }
+    .sidebar.open{left:0; box-shadow:6px 0 28px rgba(0,0,0,0.38);}
+    .sidebar-overlay{position:fixed; inset:0; background:rgba(0,0,0,0.48); z-index:99; display:none;}
     .sidebar-overlay.show{display:block;}
-    /* ── Bottom tab bar ── */
+    .main{padding:0 0 66px; max-width:100%; width:100%; background:var(--m-paper);}
+    .mobile-topbar{
+      display:flex; align-items:center; justify-content:space-between;
+      background:var(--m-card); border-bottom:1px solid var(--m-line);
+      padding:10px 18px; position:sticky; top:0; z-index:80;
+    }
+    .mobile-topbar-title{font-family:'Spectral',Georgia,serif; font-size:17px; color:var(--m-navy); font-weight:600;}
+    .mobile-topbar-title span{color:var(--m-teal);}
+    .mobile-menu-btn{
+      width:34px; height:34px; border-radius:50%; background:var(--m-teal-tint);
+      border:none; color:var(--m-teal-dark); font-size:18px;
+      cursor:pointer; display:flex; align-items:center; justify-content:center;
+    }
     .mobile-tabbar{
       display:flex; position:fixed; bottom:0; left:0; right:0;
-      background:var(--ink); border-top:1px solid #2C3C57;
-      z-index:90; height:58px; padding-bottom:env(safe-area-inset-bottom,0);
+      background:var(--m-card); border-top:1px solid var(--m-line);
+      z-index:90; height:60px; padding-bottom:env(safe-area-inset-bottom,0);
     }
     .mobile-tab{
       flex:1; display:flex; flex-direction:column; align-items:center;
-      justify-content:center; font-size:10px; color:#8C99B2; cursor:pointer;
-      padding:6px 2px; gap:3px; border:none; background:none;
+      justify-content:center; font-size:10px; font-weight:500;
+      color:var(--m-mute); cursor:pointer; gap:3px; border:none; background:none; padding:6px 2px;
     }
-    .mobile-tab.active{color:#D98A7E;}
-    .mobile-tab-icon{font-size:20px; line-height:1;}
-    .mobile-tab-menu{
-      flex:1; display:flex; flex-direction:column; align-items:center;
-      justify-content:center; font-size:10px; color:#8C99B2; cursor:pointer;
-      padding:6px 2px; gap:3px; border:none; background:none;
-    }
-    /* ── Main area: full width with bottom padding for tab bar ── */
-    .main{
-      padding:12px 14px 76px; max-width:100%; width:100%;
-      min-height:100vh;
-    }
-    /* ── Top header bar ── */
-    .mobile-topbar{
-      display:flex; align-items:center; justify-content:space-between;
-      background:var(--ink); color:#F1EEE5; padding:10px 14px;
-      position:sticky; top:0; z-index:80;
-    }
-    .mobile-topbar-title{font-family:var(--serif); font-size:17px; color:#F1EEE5;}
-    .mobile-topbar-title span{color:#D98A7E;}
-    .mobile-menu-btn{
-      background:none; border:none; color:#F1EEE5; font-size:22px;
-      cursor:pointer; padding:4px 6px; line-height:1;
-    }
-    /* ── Patient header: stack vertically ── */
-    .patient-header{flex-direction:column; gap:10px;}
-    .patient-header h1{font-size:20px;}
-    .header-stats{flex-wrap:wrap; gap:8px;}
-    .stat-box{min-width:72px; padding:8px 10px; flex:1;}
-    .stat-box .value{font-size:16px;}
-    .stat-box .label{font-size:9px;}
-    /* ── Cards and forms ── */
-    .card{padding:14px 14px;}
+    .mobile-tab svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;}
+    .mobile-tab.active{color:var(--m-teal-dark);}
+    .mobile-tab.active svg{stroke:var(--m-teal-dark);}
+    .patient-header{flex-direction:column; gap:10px; padding:14px 16px 10px; background:var(--m-card); border-bottom:1px solid var(--m-line); margin-bottom:0;}
+    .patient-header h1{font-family:'Spectral',Georgia,serif; font-size:20px; color:var(--m-navy);}
+    .patient-header .meta{font-size:12px; color:var(--m-slate);}
+    .header-stats{flex-wrap:wrap; gap:8px; margin-top:4px;}
+    .stat-box{min-width:76px; flex:1; padding:10px 12px; border-radius:12px;}
+    .stat-box .value{font-size:17px; font-family:'IBM Plex Mono','Courier New',monospace;}
+    .stat-box .label{font-size:9.5px; color:var(--m-slate);}
+    .stat-box.alert{background:var(--m-red-tint); border-color:#E8C0BC;}
+    .stat-box.alert .value{color:var(--m-red);}
+    .stat-box.ok .value{color:var(--m-green);}
+    .card{padding:14px 16px; border-radius:14px; margin:10px 12px;}
+    .card h3{font-size:11px;}
     .grid{grid-template-columns:1fr;}
     .grid3{grid-template-columns:1fr;}
     .span2{grid-column:span 1;}
-    .field input, .field select, .field textarea{
-      font-size:16px; /* prevents iOS zoom */
-      padding:11px 12px;
+    .field input, .field select, .field textarea{font-size:16px; padding:12px 12px; border-radius:10px;}
+    .field label{font-size:13px; color:var(--m-slate);}
+    .patient-row{
+      display:flex; align-items:center; gap:10px; background:var(--m-card);
+      border:1px solid var(--m-line); border-radius:12px; padding:11px 12px; margin-bottom:8px;
     }
-    .field label{font-size:13px;}
-    /* ── Tabs ── */
-    .tabs{gap:0; overflow-x:auto; -webkit-overflow-scrolling:touch; flex-wrap:nowrap;}
-    .tab{font-size:12px; padding:10px 12px; white-space:nowrap;}
-    /* ── Buttons ── */
-    .btn, .btn-primary, .btn-danger{
-      padding:11px 16px; font-size:13.5px; min-height:44px;
-    }
-    .row-actions{flex-wrap:wrap; gap:8px;}
-    .row-actions .btn, .row-actions button{flex:1; min-width:120px;}
-    /* ── History table: horizontal scroll ── */
-    .card div.table-scroll{overflow-x:auto; -webkit-overflow-scrolling:touch;}
-    table.history{font-size:12px; min-width:600px;}
-    table.history th, table.history td{padding:7px 7px;}
+    .patient-row.active{background:var(--m-teal-tint); border-color:var(--m-teal);}
+    .patient-row .pname{font-size:13.5px; font-weight:600; color:var(--m-navy);}
+    .patient-row .pmrn{font-size:11px; color:var(--m-slate);}
+    .passover-bar, .passover-bar.has-notes{margin:10px 12px; border-radius:12px;}
+    .patient-status-strip{margin:10px 12px 0; border-radius:10px; font-size:12.5px;}
+    .alert-banner{margin:10px 12px; border-radius:10px; font-size:13px;}
+    .tabs{gap:0; border-bottom:1px solid var(--m-line); overflow-x:auto; flex-wrap:nowrap; background:var(--m-card); margin:0;}
+    .tab{font-size:12.5px; padding:12px 14px; white-space:nowrap; color:var(--m-slate);}
+    .tab.active{color:var(--m-teal-dark); border-bottom-color:var(--m-teal);}
+    .btn{padding:12px 16px; font-size:13.5px; min-height:44px; border-radius:10px;}
+    .btn-primary{background:var(--m-teal); border-color:var(--m-teal); color:#fff;}
+    .btn-primary:hover{background:var(--m-teal-dark);}
+    .btn-danger{color:var(--m-red); border-color:#E8C0BC; background:var(--m-red-tint);}
+    .row-actions{flex-wrap:wrap; gap:8px; padding:0 4px 4px;}
+    .row-actions .btn{flex:1; min-width:120px;}
+    .table-scroll{overflow-x:auto; -webkit-overflow-scrolling:touch;}
+    table.history{font-size:12px; min-width:580px;}
+    table.history th, table.history td{padding:7px 8px;}
     table.ttr-table{font-size:11.5px;}
     table.ttr-table th, table.ttr-table td{padding:6px 6px;}
-    /* ── Passover banner ── */
-    .passover-bar{padding:12px 12px;}
-    .patient-status-strip{padding:8px 12px; font-size:12.5px;}
-    /* ── TTR overview ── */
-    .ttr-overview-header{flex-wrap:wrap; gap:8px;}
-    .ttr-avg-box{padding:12px 14px; min-width:110px;}
-    .ttr-avg-box .av-value{font-size:22px;}
-    .ttr-count-box{min-width:80px;}
-    /* ── Defaulter rows ── */
+    .ttr-overview-header{flex-wrap:wrap; gap:8px; padding:0 12px;}
+    .ttr-avg-box{border-radius:12px; padding:14px 16px; min-width:100px;}
+    .ttr-avg-box .av-value{font-size:24px;}
     .defaulter-row{grid-template-columns:1fr; gap:8px;}
-    /* ── Modal ── */
-    .modal{width:94vw; padding:18px 14px; max-height:90vh; overflow-y:auto;}
-    /* ── Regime section ── */
-    .regime-section{padding:12px 12px;}
-    .regime-card{padding:10px 12px;}
-    /* ── Logout row ── */
-    .logout-row{padding-top:10px; margin-top:10px;}
-    /* ── DB status ── */
-    .db-status{margin-bottom:6px;}
-  }
-  @media(max-width:700px){
+    .modal{width:94vw; padding:20px 16px; max-height:88vh; overflow-y:auto; border-radius:16px;}
+    .regime-section{padding:12px 14px; border-radius:12px;}
+    .regime-card{padding:12px 14px; border-radius:10px;}
+    .logout-row{padding-top:12px; margin-top:8px;}
+    .db-status{margin-bottom:8px; font-size:11.5px;}
     .hide-mobile{display:none!important;}
-    /* Sidebar action buttons: hide bulk on mobile (accessible via sidebar drawer) */
     .sidebar-reports-row, .sidebar-import-row{display:none;}
   }
-  /* Desktop: hide mobile-only elements */
   @media(min-width:701px){
     .mobile-tabbar{display:none;}
     .mobile-topbar{display:none;}
     .sidebar-overlay{display:none;}
   }
-
-  /* mobile restyle: icons, INR ribbon, appointments view */
-  svg.nav-icon{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;display:block;margin:0 auto 2px;}
-
-  .ribbon{width:44px;height:7px;border-radius:4px;overflow:hidden;display:inline-flex;position:relative;vertical-align:middle;flex-shrink:0;}
-  .ribbon i{flex:1;}
-  .ribbon .z-low{background:var(--accent);opacity:.30;}
-  .ribbon .z-lowmid{background:var(--warn);opacity:.35;}
-  .ribbon .z-mid{background:var(--good);opacity:.5;}
-  .ribbon .z-highmid{background:var(--warn);opacity:.35;}
-  .ribbon .z-high{background:var(--accent);opacity:.30;}
-  .ribbon .dot{position:absolute;top:-2px;width:5px;height:11px;border-radius:2px;background:var(--ink);}
-
-  .appt-row{display:flex;justify-content:space-between;align-items:center;padding:10px 4px;border-bottom:1px solid #EEEAE0;cursor:pointer;}
-  .appt-row:last-child{border-bottom:none;}
-  .appt-row:hover{background:#FCFBF7;}
-  .appt-row .apn{font-size:13.5px;font-weight:600;color:var(--ink);}
-  .appt-row .apmrn{font-size:11px;color:var(--ink-soft);font-family:var(--mono);display:flex;align-items:center;gap:8px;}
-
-  .weekstrip{display:flex;gap:6px;margin-bottom:14px;overflow-x:auto;-webkit-overflow-scrolling:touch;}
-  .daypill{flex:0 0 56px;display:flex;flex-direction:column;align-items:center;gap:4px;background:var(--card);border:1px solid var(--line);border-radius:9px;padding:8px 4px;cursor:pointer;}
-  .daypill .dow{font-size:9.5px;color:var(--ink-soft);font-weight:600;text-transform:uppercase;}
-  .daypill .dnum{font-size:14px;font-weight:700;color:var(--ink);font-family:var(--mono);}
-  .daypill .cnt{font-size:9px;color:var(--good);font-weight:600;}
-  .daypill.selected{box-shadow:inset 0 0 0 2px var(--ink);}
-  .daypill.holiday{background:#E7E5DE;border-color:#C9C5B8;}
-  .daypill.holiday .dnum,.daypill.holiday .dow,.daypill.holiday .cnt{color:#7A7A70;}
-  .daypill.combined{background:#F1E9F7;border-color:#B98FD1;}
-  .daypill.combined .dnum,.daypill.combined .dow,.daypill.combined .cnt{color:#6A2E8C;}
-
-  .clinic-status-row{display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap;}
-  .clinic-status-select{padding:7px 10px;border-radius:7px;border:1px solid var(--line);font-size:12.5px;background:var(--card);}
-  .clinic-badge{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:20px;}
-  .clinic-badge.normal{background:var(--good-soft);color:var(--good);}
-  .clinic-badge.holiday{background:#E7E5DE;color:#6B6B60;}
-  .clinic-badge.combined{background:#F1E9F7;color:#6A2E8C;}
 </style>
 </head>
 <body>
 
-<svg width="0" height="0" style="position:absolute">
+<!-- SVG icon defs (used by mobile bottom nav) -->
+<svg width="0" height="0" style="position:absolute;pointer-events:none;">
 <defs>
-<symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4"/><path d="M5 20c1-4 4-6 7-6s6 2 7 6"/></symbol>
-<symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V10M11 20V4M18 20v-7"/><path d="M3 20h18"/></symbol>
-<symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.5 2"/></symbol>
-<symbol id="i-cal" viewBox="0 0 24 24"><rect x="4" y="5.5" width="16" height="14.5" rx="2"/><path d="M4 10h16M8 3.5v4M16 3.5v4"/></symbol>
-<symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
-<symbol id="i-trend" viewBox="0 0 24 24"><path d="M3 17 9 11l4 4 8-9"/><path d="M15 6h6v6"/></symbol>
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M4 11.5 12 4l8 7.5"/><path d="M6 10v9a1 1 0 0 0 1 1h4v-6h2v6h4a1 1 0 0 0 1-1v-9"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4"/><path d="M5 20c1-4 4-6 7-6s6 2 7 6"/></symbol>
+  <symbol id="i-cal" viewBox="0 0 24 24"><rect x="4" y="5.5" width="16" height="14.5" rx="2"/><path d="M4 10h16M8 3.5v4M16 3.5v4"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V10M11 20V4M18 20v-7"/><path d="M3 20h18"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 10a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6Z"/><path d="M10 19a2 2 0 0 0 4 0"/></symbol>
 </defs>
 </svg>
 
@@ -340,7 +297,7 @@
   <div class="mobile-topbar">
     <span class="mobile-topbar-title">INR<span>Clinic</span></span>
     <button class="mobile-menu-btn" onclick="toggleSidebar()" aria-label="Menu">
-      <svg class="nav-icon" style="width:22px;height:22px;margin:0;"><use href="#i-menu"/></svg>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
     </button>
   </div>
 
@@ -353,7 +310,6 @@
     <div class="nav-switch" style="flex-wrap:wrap; gap:5px;">
       <div class="nav-btn active" id="navPatients" onclick="switchView('patients')" style="flex:1 1 70px;">Patients</div>
       <div class="nav-btn" id="navTTR" onclick="switchView('ttr')" style="flex:1 1 50px;">TTR</div>
-      <div class="nav-btn" id="navAppointments" onclick="switchView('appointments')" style="flex:1 1 60px;">Appts</div>
       <div class="nav-btn" id="navDefaulters" onclick="switchView('defaulters')" style="flex:1 1 70px;">Defaulters</div>
       <div class="nav-btn" id="navAnalysis" onclick="switchView('analysis')" style="flex:1 1 70px;">Analysis</div>
       <div class="nav-btn" id="navSettings" onclick="switchView('settings')" style="flex:1 1 80px;">Rules</div>
@@ -391,22 +347,19 @@
   <!-- Mobile bottom tab bar -->
   <nav class="mobile-tabbar">
     <button class="mobile-tab active" id="mTabPatients" onclick="mobileSwitchView('patients')">
-      <svg class="nav-icon"><use href="#i-user"/></svg>Patients
-    </button>
-    <button class="mobile-tab" id="mTabAppointments" onclick="mobileSwitchView('appointments')">
-      <svg class="nav-icon"><use href="#i-cal"/></svg>Appts
+      <svg viewBox="0 0 24 24"><use href="#i-user"/></svg>Patients
     </button>
     <button class="mobile-tab" id="mTabTTR" onclick="mobileSwitchView('ttr')">
-      <svg class="nav-icon"><use href="#i-chart"/></svg>TTR
+      <svg viewBox="0 0 24 24"><use href="#i-chart"/></svg>TTR
     </button>
     <button class="mobile-tab" id="mTabDefaulters" onclick="mobileSwitchView('defaulters')">
-      <svg class="nav-icon"><use href="#i-clock"/></svg>Default.
+      <svg viewBox="0 0 24 24"><use href="#i-bell"/></svg>Defaulters
     </button>
     <button class="mobile-tab" id="mTabAnalysis" onclick="mobileSwitchView('analysis')">
-      <svg class="nav-icon"><use href="#i-trend"/></svg>Analysis
+      <svg viewBox="0 0 24 24"><use href="#i-cal"/></svg>Analysis
     </button>
     <button class="mobile-tab" id="mTabMenu" onclick="toggleSidebar()">
-      <svg class="nav-icon"><use href="#i-menu"/></svg>Menu
+      <svg viewBox="0 0 24 24"><use href="#i-menu"/></svg>Menu
     </button>
   </nav>
 </div>
@@ -572,7 +525,7 @@ function toggleSidebar(){
 }
 
 function syncMobileTabs(view){
-  const map = {patients:'mTabPatients', appointments:'mTabAppointments', ttr:'mTabTTR', defaulters:'mTabDefaulters', analysis:'mTabAnalysis'};
+  const map = {patients:'mTabPatients', ttr:'mTabTTR', defaulters:'mTabDefaulters', analysis:'mTabAnalysis'};
   Object.values(map).forEach(id=>{ const el=document.getElementById(id); if(el) el.classList.remove("active"); });
   if(map[view]){ const el=document.getElementById(map[view]); if(el) el.classList.add("active"); }
 }
@@ -808,14 +761,12 @@ function getRuleSuggestion(inr, low, high, rules, currentTwd){
 function switchView(view){
   currentView = view;
   document.getElementById("navPatients").classList.toggle("active", view==="patients");
-  document.getElementById("navAppointments").classList.toggle("active", view==="appointments");
   document.getElementById("navTTR").classList.toggle("active", view==="ttr");
   document.getElementById("navDefaulters").classList.toggle("active", view==="defaulters");
   document.getElementById("navAnalysis").classList.toggle("active", view==="analysis");
   document.getElementById("navSettings").classList.toggle("active", view==="settings");
   syncMobileTabs(view);
   if(view==="patients") renderMain();
-  else if(view==="appointments") renderAppointmentsView();
   else if(view==="ttr") renderTTROverview();
   else if(view==="defaulters") renderDefaultersView();
   else if(view==="analysis") renderAnalysisView();
@@ -884,8 +835,6 @@ async function renderPatientList(){
     const visits = await loadVisits(p.id);
     const ttr = calcTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
     const status = getPatientStatus(visits);
-    const lastV = [...visits].filter(v=>v.date).sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
-    const ribbonHtml = lastV?.inr ? renderRibbon(parseFloat(lastV.inr), parseFloat(p.targetLow), parseFloat(p.targetHigh)) : '';
     const row = document.createElement("div");
     row.className = "patient-row" + (p.id === currentPatientId ? " active" : "");
     if(p.isActive===false) row.style.opacity="0.55";
@@ -896,7 +845,7 @@ async function renderPatientList(){
       (p.isActive===false?'<span class="status-badge sb-inactive">Inactive</span>':'')+
       (p.ttrExcluded?'<span class="status-badge sb-excluded">Excl.</span>':'')+
       (p.passoverNotes?'<span title="Has passover notes" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#E6A800;margin-left:5px;vertical-align:middle;"></span>':'')+
-      '</div><div class="pmrn">'+escapeHtml(p.mrn)+' '+ribbonHtml+'</div>'+
+      '</div><div class="pmrn">'+escapeHtml(p.mrn)+'</div>'+
       '<div style="font-size:11px; color:'+statusColor+'; margin-top:3px;">'+escapeHtml(status.label)+'</div>'+pill;
     row.onclick = () => selectPatient(p.id);
     list.appendChild(row);
@@ -1804,108 +1753,6 @@ async function toggleTTRExclude(patientId){
   p.ttrExcluded = !p.ttrExcluded;
   await upsertPatientRow(p, true);
   renderTTROverview();
-}
-
-// ---------- INR range ribbon ----------
-function renderRibbon(inr, low, high){
-  if(isNaN(inr)) return '';
-  const scaleMin = Math.min(low-1.5, 0.5), scaleMax = Math.max(high+1.5, 4.5);
-  let pct = ((inr - scaleMin) / (scaleMax - scaleMin)) * 100;
-  pct = Math.max(2, Math.min(98, pct));
-  return '<span class="ribbon" title="INR '+inr.toFixed(1)+'"><i class="z-low"></i><i class="z-lowmid"></i><i class="z-mid"></i><i class="z-highmid"></i><i class="z-high"></i><span class="dot" style="left:'+pct.toFixed(0)+'%;"></span></span>';
-}
-
-// ---------- Appointments view (Thursday clinic calendar) ----------
-async function fetchClinicDayStatus(){
-  try{
-    const {data, error} = await sb.from("clinic_days").select("*");
-    if(error) return {};
-    const map = {};
-    for(const d of data) map[d.date] = d;
-    return map;
-  }catch(e){ return {}; }
-}
-async function saveClinicDayStatus(date, status){
-  try{
-    const {error} = await sb.from("clinic_days").upsert({date, status});
-    if(error){ showToast("Failed to save clinic day: "+error.message,"error"); return; }
-    showToast("Clinic day updated ✓","success",2000);
-  }catch(e){ showToast("clinic_days table not found — run migration.sql first","error",6000); }
-}
-function getUpcomingThursdays(count){
-  const out=[];
-  const d=new Date(); d.setHours(0,0,0,0);
-  while(d.getDay()!==4) d.setDate(d.getDate()+1);
-  for(let i=0;i<count;i++){ out.push(new Date(d)); d.setDate(d.getDate()+7); }
-  return out;
-}
-let selectedApptDate = null;
-
-async function renderAppointmentsView(){
-  const main = document.getElementById("main");
-  if(!configOk){ main.innerHTML = configWarningHtml(); return; }
-  for(const p of patients){ if(!visitsCache[p.id]) await loadVisits(p.id); }
-  const clinicDays = await fetchClinicDayStatus();
-  const thursdays = getUpcomingThursdays(8);
-  const fmt = d => d.toISOString().slice(0,10);
-  if(!selectedApptDate) selectedApptDate = fmt(thursdays[0]);
-
-  const countByDate = {};
-  for(const p of patients){
-    if(p.isActive===false) continue;
-    const sorted = [...(visitsCache[p.id]||[])].filter(v=>v.date&&v.nextAppt).sort((a,b)=>new Date(b.date)-new Date(a.date));
-    if(!sorted.length) continue;
-    countByDate[sorted[0].nextAppt] = (countByDate[sorted[0].nextAppt]||0)+1;
-  }
-
-  const strip = thursdays.map(d=>{
-    const ds = fmt(d);
-    const info = clinicDays[ds] || {status:''};
-    const cls = 'daypill'+(ds===selectedApptDate?' selected':'')+(info.status==='holiday'?' holiday':'')+(info.status==='combined'?' combined':'');
-    const cnt = countByDate[ds]||0;
-    const cntLabel = info.status==='holiday' ? 'closed' : (cnt>0 ? cnt+' pt' : '—');
-    return '<div class="'+cls+'" onclick="selectApptDate(\''+ds+'\')"><span class="dow">Thu</span><span class="dnum">'+d.getDate()+'</span><span class="cnt">'+cntLabel+'</span></div>';
-  }).join('');
-
-  const selInfo = clinicDays[selectedApptDate] || {status:''};
-  const dateLabel = new Date(selectedApptDate).toLocaleDateString('en-GB',{weekday:'short', day:'numeric', month:'short'});
-  const badgeCls = selInfo.status==='holiday'?'holiday':(selInfo.status==='combined'?'combined':'normal');
-  const badgeLabel = selInfo.status==='holiday'?'Public holiday / clinic closed':(selInfo.status==='combined'?'Combined with Nephrology':'Normal clinic day');
-
-  const patientsForDate = patients.filter(p=>{
-    if(p.isActive===false) return false;
-    const sorted = [...(visitsCache[p.id]||[])].filter(v=>v.date&&v.nextAppt).sort((a,b)=>new Date(b.date)-new Date(a.date));
-    return sorted.length && sorted[0].nextAppt === selectedApptDate;
-  });
-
-  let listHtml = patientsForDate.length===0
-    ? '<div class="empty-state">No patients scheduled for this date.</div>'
-    : patientsForDate.map(p=>{
-        const sorted = [...(visitsCache[p.id]||[])].filter(v=>v.date).sort((a,b)=>new Date(b.date)-new Date(a.date));
-        const lastINR = sorted[0]?.inr;
-        const ribbon = lastINR ? renderRibbon(parseFloat(lastINR), parseFloat(p.targetLow), parseFloat(p.targetHigh)) : '';
-        return '<div class="appt-row" onclick="selectPatient(\''+p.id+'\')">'+
-          '<span class="apn">'+escapeHtml(p.name)+'</span>'+
-          '<span class="apmrn">'+escapeHtml(p.mrn)+' '+ribbon+'</span></div>';
-      }).join('');
-
-  main.innerHTML =
-    '<div class="patient-header"><div><h1>Appointments</h1><div class="meta">Clinic runs every Thursday</div></div></div>'+
-    '<div class="weekstrip">'+strip+'</div>'+
-    '<div class="clinic-status-row">'+
-      '<span class="clinic-badge '+badgeCls+'">'+badgeLabel+'</span>'+
-      '<select class="clinic-status-select" onchange="updateSelectedClinicDay(this.value)">'+
-        '<option value="" '+(selInfo.status===''?'selected':'')+'>Normal clinic day</option>'+
-        '<option value="holiday" '+(selInfo.status==='holiday'?'selected':'')+'>Public holiday / clinic closed</option>'+
-        '<option value="combined" '+(selInfo.status==='combined'?'selected':'')+'>Combined with Nephrology</option>'+
-      '</select>'+
-    '</div>'+
-    '<div class="card"><h3>'+dateLabel+' · '+patientsForDate.length+' patient'+(patientsForDate.length!==1?'s':'')+'</h3>'+listHtml+'</div>';
-}
-function selectApptDate(ds){ selectedApptDate = ds; renderAppointmentsView(); }
-async function updateSelectedClinicDay(status){
-  await saveClinicDayStatus(selectedApptDate, status);
-  await renderAppointmentsView();
 }
 
 // ---------- Defaulter detection ----------
