@@ -47,6 +47,47 @@
   .placeholder{display:flex; flex-direction:column; align-items:flex-start; justify-content:center; height:70vh; color:var(--ink-soft);}
   .placeholder h1{font-family:var(--serif); font-size:30px; margin:0 0 8px;}
   .placeholder p{font-size:14px; max-width:460px; line-height:1.6;}
+  /* Dashboard */
+  .dashboard{padding:28px 32px 40px;}
+  .greeting{margin-bottom:24px;}
+  .greeting-time{font-size:12px; text-transform:uppercase; letter-spacing:1px; color:var(--ink-soft); margin-bottom:4px;}
+  .greeting-name{font-family:var(--serif); font-size:26px; color:var(--ink);}
+  .greeting-sub{font-size:13px; color:var(--ink-soft); margin-top:4px;}
+  .dash-grid{display:grid; grid-template-columns:1fr 1fr; gap:18px;}
+  .dash-card{background:var(--card); border:1px solid var(--line); border-radius:14px; overflow:hidden; display:flex; flex-direction:column;}
+  .dash-card-header{display:flex; align-items:center; justify-content:space-between; padding:14px 16px 10px;}
+  .dash-card-title{font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.6px; color:var(--ink-soft);}
+  .dash-card-icon{width:32px; height:32px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:16px;}
+  .dash-card-body{padding:0 16px 14px; flex:1; overflow:hidden;}
+  .dash-search{width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--line); background:#FCFBF7; font-size:13px; margin-bottom:10px;}
+  .dash-search:focus{outline:none; border-color:var(--accent);}
+  .dash-patient-row{display:flex; align-items:center; justify-content:space-between; padding:8px 10px; border-radius:8px; cursor:pointer; border:1px solid transparent; margin-bottom:4px;}
+  .dash-patient-row:hover{background:#F0EDE4; border-color:var(--line);}
+  .dash-patient-name{font-size:13px; font-weight:600; color:var(--ink);}
+  .dash-patient-meta{font-size:11px; color:var(--ink-soft);}
+  .dash-appt-row{display:flex; align-items:center; justify-content:space-between; padding:9px 10px; border-radius:8px; border:1px solid var(--line); margin-bottom:5px; background:#FCFBF7;}
+  .dash-appt-name{font-size:13px; font-weight:600; color:var(--ink); cursor:pointer;}
+  .dash-appt-name:hover{color:var(--accent);}
+  .dash-status-done{display:inline-flex; align-items:center; gap:4px; font-size:11.5px; font-weight:600; color:var(--good); background:var(--good-soft); padding:2px 8px; border-radius:20px;}
+  .dash-status-pending{display:inline-flex; align-items:center; gap:4px; font-size:11.5px; font-weight:600; color:var(--warn); background:var(--warn-soft); padding:2px 8px; border-radius:20px;}
+  .dash-defaulter-row{display:flex; align-items:center; justify-content:space-between; padding:8px 10px; border-radius:8px; border-left:3px solid var(--accent); background:#FDF8F7; margin-bottom:5px; cursor:pointer;}
+  .dash-defaulter-row:hover{background:#F9EDEB;}
+  .dash-defaulter-name{font-size:13px; font-weight:600; color:var(--ink);}
+  .dash-defaulter-meta{font-size:11px; color:var(--ink-soft);}
+  .dash-ttr-row{display:flex; align-items:center; justify-content:space-between; padding:7px 10px; border-radius:8px; background:#F8F5F0; margin-bottom:4px;}
+  .dash-ttr-name{font-size:12.5px; font-weight:600; color:var(--ink); cursor:pointer;}
+  .dash-ttr-name:hover{color:var(--accent);}
+  .dash-stat-row{display:flex; gap:12px; margin-bottom:12px;}
+  .dash-stat{flex:1; text-align:center; background:#F8F5F0; border-radius:10px; padding:10px 8px;}
+  .dash-stat-val{font-family:var(--mono); font-size:20px; font-weight:700;}
+  .dash-stat-lbl{font-size:10px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.5px; margin-top:2px;}
+  .dash-empty{font-size:13px; color:var(--ink-soft); padding:8px 0; font-style:italic;}
+  .dash-viewall{font-size:12px; color:var(--accent); cursor:pointer; font-weight:600; text-align:right; padding:6px 0 0; display:block;}
+  @media(max-width:700px){
+    .dashboard{padding:14px 12px 24px;}
+    .dash-grid{grid-template-columns:1fr; gap:14px;}
+    .greeting-name{font-size:20px;}
+  }
   .patient-header{display:flex; justify-content:space-between; align-items:flex-start; border-bottom:1px solid var(--line); padding-bottom:18px; margin-bottom:22px;}
   .patient-header h1{font-family:var(--serif); font-size:28px; margin:0 0 4px;}
   .patient-header .meta{font-size:13px; color:var(--ink-soft); font-family:var(--mono);}
@@ -508,6 +549,69 @@ async function loadApp(){
   patients = await fetchPatients();
   await renderPatientList();
   await renderMain();
+  setupRealtime();
+}
+
+// ── Real-time sync ──
+let realtimeChannel = null;
+function setupRealtime(){
+  if(!configOk || !sb) return;
+  if(realtimeChannel) sb.removeChannel(realtimeChannel);
+
+  realtimeChannel = sb.channel('clinic-changes')
+    // Patient changes (add, edit, delete by another user)
+    .on('postgres_changes', {event:'*', schema:'public', table:'patients'}, async payload=>{
+      const {eventType, new:newRow, old:oldRow} = payload;
+      if(eventType==='INSERT'){
+        const p = rowToPatient(newRow);
+        if(!patients.find(x=>x.id===p.id)){
+          patients.push(p);
+          showToast('New patient added: '+p.name,'info',3000);
+        }
+      } else if(eventType==='UPDATE'){
+        const idx = patients.findIndex(x=>x.id===newRow.id);
+        if(idx>=0){
+          const wasCurrentPatient = patients[idx].id === currentPatientId;
+          patients[idx] = rowToPatient(newRow);
+          delete ttrCache[newRow.id];
+          if(wasCurrentPatient) await renderMain();
+        }
+      } else if(eventType==='DELETE'){
+        const id = oldRow.id;
+        patients = patients.filter(x=>x.id!==id);
+        delete ttrCache[id]; delete visitsCache[id];
+        if(currentPatientId===id){ currentPatientId=null; await renderMain(); }
+        showToast('A patient record was removed by another user','info',4000);
+      }
+      renderPatientList();
+    })
+    // Visit changes (new review, edit, delete by another user)
+    .on('postgres_changes', {event:'*', schema:'public', table:'visits'}, async payload=>{
+      const {eventType, new:newRow, old:oldRow} = payload;
+      const patientId = newRow?.patient_id || oldRow?.patient_id;
+      if(!patientId) return;
+      // Skip if this change was made by the current session (we already updated cache)
+      const currentUserEmail = currentSession?.user?.email||'';
+      if(newRow?.reviewer && newRow.reviewer === (currentReviewerName||currentUserEmail)) return;
+      // Invalidate and optionally notify
+      invalidateTTRCache(patientId);
+      if(eventType==='INSERT'){
+        if(patientId !== currentPatientId){
+          const p = patients.find(x=>x.id===patientId);
+          if(p) showToast('New review added for '+p.name+' by another reviewer','info',4000);
+        }
+      }
+      // If viewing affected patient, refresh their panel
+      if(patientId === currentPatientId){
+        await renderMain();
+        showTab(currentTab);
+      }
+      renderPatientList();
+    })
+    .subscribe(status=>{
+      if(status==='SUBSCRIBED') setDbStatus(true,'Live sync active');
+      if(status==='CLOSED') setDbStatus(false,'Sync disconnected');
+    });
 }
 
 function escapeHtml(s){
@@ -533,7 +637,9 @@ function syncMobileTabs(view){
 function mobileSwitchView(view){
   document.getElementById("sidebar").classList.remove("open");
   document.getElementById("sidebarOverlay").classList.remove("show");
-  switchView(view);
+  if(view==="patients" && !currentPatientId) renderDashboard();
+  else switchView(view);
+  syncMobileTabs(view);
 }
 
 function showToast(msg, type='info', duration=4000){
@@ -554,7 +660,32 @@ function setDbStatus(ok, msg){
   text.innerText = msg;
 }
 
-// ---------- data layer ----------
+// ── Audit trail ──
+async function writeAuditLog(tableName, recordId, action, payload){
+  if(!configOk || !currentSession) return;
+  try{
+    await sb.from("audit_log").insert({
+      table_name: tableName,
+      record_id: recordId,
+      action,
+      payload: payload||null,
+      changed_by: currentSession.user.email,
+      reviewer_name: currentReviewerName||null
+    });
+  }catch(e){ console.warn("Audit log write failed (non-critical):", e.message); }
+}
+
+async function fetchAuditLog(recordId){
+  try{
+    const {data, error} = await sb.from("audit_log")
+      .select("*")
+      .eq("record_id", recordId)
+      .order("created_at", {ascending:false})
+      .limit(50);
+    if(error) return [];
+    return data||[];
+  }catch(e){ return []; }
+}
 function rowToPatient(r){
   return {id:r.id, name:r.name, mrn:r.mrn, phone:r.phone||"", indication:r.indication||"", targetLow:r.target_low, targetHigh:r.target_high, duration:r.duration||"", notes:r.notes||"", passoverNotes:r.passover_notes||"", initiationDate:r.initiation_date||"", isActive:r.is_active!==false, ttrExcluded:r.ttr_excluded||false, ttrExcludeReason:r.ttr_exclude_reason||""};
 }
@@ -562,10 +693,11 @@ function patientToRow(p){
   return {id:p.id, name:p.name, mrn:p.mrn, phone:p.phone, indication:p.indication, target_low:p.targetLow, target_high:p.targetHigh, duration:p.duration, notes:p.notes||"", passover_notes:p.passoverNotes||"", initiation_date:p.initiationDate||null, is_active:p.isActive!==false, ttr_excluded:p.ttrExcluded||false, ttr_exclude_reason:p.ttrExcludeReason||""};
 }
 function rowToVisit(r){
-  return {id:r.id, date:r.date, twd:r.twd, inr:r.inr, factors:r.factors||[], factorNotes:r.factor_notes||{}, admitDate:r.admit_date||"", admitDx:r.admit_dx||"", planAction:r.plan_action, planDays:r.plan_days, planLoadMg:r.plan_load_mg, planSubAction:r.plan_sub_action||"", planSubPct:r.plan_sub_pct, newTwd:r.new_twd, nextAppt:r.next_appt||"", clinicalNote:r.clinical_note||"", regimeLabel:r.regime_label||"", inrDayBefore:r.inr_day_before||false, longerTca:r.longer_tca||false, reviewer:r.reviewer||""};
+  return {id:r.id, date:r.date, twd:r.twd, inr:r.inr, factors:r.factors||[], factorNotes:r.factor_notes||{}, admitDate:r.admit_date||"", admitDx:r.admit_dx||"", planAction:r.plan_action, planDays:r.plan_days, planLoadMg:r.plan_load_mg, planSubAction:r.plan_sub_action||"", planSubPct:r.plan_sub_pct, newTwd:r.new_twd, nextAppt:r.next_appt||"", clinicalNote:r.clinical_note||"", regimeLabel:r.regime_label||"", inrDayBefore:r.inr_day_before||false, longerTca:r.longer_tca||false, reviewer:r.reviewer||"", updatedAt:r.updated_at||null};
 }
 function visitToRow(v, patientId){
   return {id:v.id, patient_id:patientId, date:v.date||null, twd:v.twd||null, inr:v.inr||null, factors:v.factors||[], factor_notes:v.factorNotes||{}, admit_date:v.admitDate||null, admit_dx:v.admitDx||null, plan_action:v.planAction||null, plan_days:v.planDays||null, plan_load_mg:v.planLoadMg||null, plan_sub_action:v.planSubAction||null, plan_sub_pct:v.planSubPct||null, new_twd:v.newTwd||null, next_appt:v.nextAppt||null, clinical_note:v.clinicalNote||null, regime_label:v.regimeLabel||null, inr_day_before:v.inrDayBefore||false, longer_tca:v.longerTca||false, reviewer:v.reviewer||null};
+  // Note: updated_at is managed by Postgres (default now()), not sent by client
 }
 
 async function fetchPatients(){
@@ -577,11 +709,13 @@ async function upsertPatientRow(p, quiet=false){
   const {error} = await sb.from("patients").upsert(patientToRow(p));
   if(error){ console.error(error); showToast("Failed to save patient: "+error.message,"error"); return false; }
   if(!quiet) showToast("Patient saved ✓","success",2000);
+  writeAuditLog("patients", p.id, "UPSERT", {name:p.name, mrn:p.mrn, targetLow:p.targetLow, targetHigh:p.targetHigh});
   return true;
 }
 async function deletePatientRow(id){
   const {error} = await sb.from("patients").delete().eq("id", id);
   if(error){ console.error(error); showToast("Failed to delete patient: "+error.message,"error"); }
+  writeAuditLog("patients", id, "DELETE", null);
 }
 async function fetchVisits(patientId){
   const {data, error} = await sb.from("visits").select("*").eq("patient_id", patientId).order("date",{ascending:true});
@@ -589,15 +723,36 @@ async function fetchVisits(patientId){
   return data.map(rowToVisit);
 }
 async function insertVisitRow(patientId, visit){
-  const {error} = await sb.from("visits").insert(visitToRow(visit, patientId));
+  const {data, error} = await sb.from("visits").insert(visitToRow(visit, patientId)).select("updated_at").single();
   if(error){ console.error(error); showToast("Failed to save review: "+error.message,"error"); return false; }
+  if(data) visit.updatedAt = data.updated_at;
   showToast("Review saved ✓","success",2000);
+  writeAuditLog("visits", visit.id, "INSERT", {date:visit.date, inr:visit.inr, twd:visit.twd, planAction:visit.planAction, newTwd:visit.newTwd});
   return true;
 }
 async function upsertVisitRow(patientId, visit){
-  const {error} = await sb.from("visits").upsert(visitToRow(visit, patientId));
+  const {data, error} = await sb.from("visits").upsert(visitToRow(visit, patientId)).select("updated_at").single();
   if(error){ console.error(error); showToast("Failed to save review: "+error.message,"error"); return false; }
+  if(data) visit.updatedAt = data.updated_at;
+  writeAuditLog("visits", visit.id, "UPDATE", {date:visit.date, inr:visit.inr, twd:visit.twd, planAction:visit.planAction, newTwd:visit.newTwd});
   return true;
+}
+async function deleteVisitRow(visitId){
+  const {error} = await sb.from("visits").delete().eq("id", visitId);
+  if(error){ console.error(error); showToast("Failed to delete review: "+error.message,"error"); return false; }
+  showToast("Review deleted","success",2000);
+  writeAuditLog("visits", visitId, "DELETE", null);
+  return true;
+}
+
+// ── Optimistic lock check ──
+async function checkVisitConflict(visitId, localUpdatedAt){
+  if(!localUpdatedAt) return false;
+  try{
+    const {data} = await sb.from("visits").select("updated_at").eq("id", visitId).single();
+    if(data && data.updated_at && data.updated_at !== localUpdatedAt) return true;
+  }catch(e){ /* fail open */ }
+  return false;
 }
 async function deleteVisitRow(visitId){
   const {error} = await sb.from("visits").delete().eq("id", visitId);
@@ -818,11 +973,13 @@ function getPatientStatus(visits){
   return {type:'active', label:'Next TCA: '+last.nextAppt};
 }
 
+// ttrCache stores {ttr, status, hasPassover} per patient — populated lazily
+const ttrCache = {};
+
 async function renderPatientList(){
   const list = document.getElementById("patientList");
   if(!configOk){ list.innerHTML = ""; return; }
   const q = document.getElementById("searchBox").value.toLowerCase();
-  // Sort alphabetically by name
   const filtered = patients
     .filter(p => p.name.toLowerCase().includes(q) || p.mrn.toLowerCase().includes(q))
     .sort((a,b)=>a.name.localeCompare(b.name));
@@ -831,25 +988,53 @@ async function renderPatientList(){
     return;
   }
   list.innerHTML = "";
+  // Render all rows immediately with placeholder TTR
   for(const p of filtered){
-    const visits = await loadVisits(p.id);
-    const ttr = calcTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
-    const status = getPatientStatus(visits);
     const row = document.createElement("div");
+    row.id = "prow_"+p.id;
     row.className = "patient-row" + (p.id === currentPatientId ? " active" : "");
     if(p.isActive===false) row.style.opacity="0.55";
-    let pill = ttr===null ? '<span class="ttr-pill ttr-none">TTR --</span>' :
-      (ttr<60 ? '<span class="ttr-pill ttr-bad">TTR '+ttr.toFixed(1)+'%</span>' : '<span class="ttr-pill ttr-good">TTR '+ttr.toFixed(1)+'%</span>');
-    const statusColor = status.type==='defaulter'?'#E89189':(status.type==='today'?'#F0C96B':'#8C99B2');
-    row.innerHTML = '<div class="pname">'+escapeHtml(p.name)+
-      (p.isActive===false?'<span class="status-badge sb-inactive">Inactive</span>':'')+
-      (p.ttrExcluded?'<span class="status-badge sb-excluded">Excl.</span>':'')+
-      (p.passoverNotes?'<span title="Has passover notes" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#E6A800;margin-left:5px;vertical-align:middle;"></span>':'')+
-      '</div><div class="pmrn">'+escapeHtml(p.mrn)+'</div>'+
-      '<div style="font-size:11px; color:'+statusColor+'; margin-top:3px;">'+escapeHtml(status.label)+'</div>'+pill;
+    const cached = ttrCache[p.id];
+    row.innerHTML = buildPatientRowHtml(p, cached?.ttr??null, cached?.status??{type:'unknown',label:'Loading…'});
     row.onclick = () => selectPatient(p.id);
     list.appendChild(row);
   }
+  // Now lazily compute TTR for patients not yet cached — batched, non-blocking
+  const uncached = filtered.filter(p => !ttrCache[p.id]);
+  for(const p of uncached){
+    // Non-blocking: use setTimeout to yield to UI between each patient
+    setTimeout(async()=>{
+      const visits = await loadVisits(p.id);
+      const ttr = calcTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
+      const status = getPatientStatus(visits);
+      ttrCache[p.id] = {ttr, status};
+      // Patch the row in-place without re-rendering the whole list
+      const row = document.getElementById("prow_"+p.id);
+      if(row) row.innerHTML = buildPatientRowHtml(p, ttr, status);
+      // Restore click handler (innerHTML wipes it)
+      if(row) row.onclick = () => selectPatient(p.id);
+    }, 0);
+  }
+}
+
+function buildPatientRowHtml(p, ttr, status){
+  let pill = ttr===null
+    ? '<span class="ttr-pill ttr-none">TTR --</span>'
+    : (ttr<60 ? '<span class="ttr-pill ttr-bad">TTR '+ttr.toFixed(1)+'%</span>' : '<span class="ttr-pill ttr-good">TTR '+ttr.toFixed(1)+'%</span>');
+  const statusColor = !status||status.type==='defaulter'?'#E89189':(status.type==='today'?'#F0C96B':'#8C99B2');
+  const statusLabel = status?.label||'';
+  return '<div class="pname">'+escapeHtml(p.name)+
+    (p.isActive===false?'<span class="status-badge sb-inactive">Inactive</span>':'')+
+    (p.ttrExcluded?'<span class="status-badge sb-excluded">Excl.</span>':'')+
+    (p.passoverNotes?'<span title="Has passover notes" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#E6A800;margin-left:5px;vertical-align:middle;"></span>':'')+
+    '</div><div class="pmrn">'+escapeHtml(p.mrn)+'</div>'+
+    '<div style="font-size:11px; color:'+statusColor+'; margin-top:3px;">'+escapeHtml(statusLabel)+'</div>'+pill;
+}
+
+// Invalidate ttrCache for a specific patient (call after any visit change)
+function invalidateTTRCache(patientId){
+  delete ttrCache[patientId];
+  delete visitsCache[patientId];
 }
 
 // ---------- New patient ----------
@@ -1002,7 +1187,223 @@ async function selectPatient(id){
   await renderMain();
 }
 
-// ---------- Main render ----------
+// ── Dashboard helpers ──
+function getGreeting(){
+  const h = new Date().getHours();
+  if(h<12) return "Good morning";
+  if(h<17) return "Good afternoon";
+  return "Good evening";
+}
+
+function isVisitReviewedForAppt(visits, apptDateStr){
+  // A TCA is "reviewed" if there's a visit with date >= apptDate recorded after the TCA was set
+  return visits.some(v => v.date && v.date >= apptDateStr);
+}
+
+async function renderDashboard(){
+  const main = document.getElementById("main");
+  if(!configOk){ main.innerHTML = configWarningHtml(); return; }
+
+  const today = new Date().toISOString().slice(0,10);
+  const name = currentReviewerName || currentSession?.user?.email?.split('@')[0] || "Reviewer";
+  const dateStr = new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+
+  // ── 1. Build patients card (instant, searchable) ──
+  const sortedPts = [...patients].filter(p=>p.isActive!==false).sort((a,b)=>a.name.localeCompare(b.name));
+  const patientsCardHtml = buildPatientsCard(sortedPts, "");
+
+  // ── 2. Appointment card for today ──
+  const apptCardHtml = await buildApptCard(today);
+
+  // ── 3. Defaulters card ──
+  for(const p of patients){ if(!visitsCache[p.id]) await loadVisits(p.id); }
+  const {overdue, missingAppt} = getDefaulters(patients, visitsCache);
+  const defaulterCardHtml = buildDefaulterCard(overdue, missingAppt);
+
+  // ── 4. TTR card ──
+  const ttrCardHtml = buildTTRSummaryCard();
+
+  main.innerHTML =
+    '<div class="dashboard">'+
+      '<div class="greeting">'+
+        '<div class="greeting-time">'+dateStr+'</div>'+
+        '<div class="greeting-name">'+getGreeting()+', '+escapeHtml(name)+'</div>'+
+        '<div class="greeting-sub">Here\'s today\'s clinic overview</div>'+
+      '</div>'+
+      '<div class="dash-grid" id="dashGrid">'+
+        patientsCardHtml+
+        apptCardHtml+
+        defaulterCardHtml+
+        ttrCardHtml+
+      '</div>'+
+    '</div>';
+}
+
+function buildPatientsCard(pts, q){
+  const filtered = q ? pts.filter(p=>p.name.toLowerCase().includes(q.toLowerCase())||p.mrn.toLowerCase().includes(q.toLowerCase())) : pts;
+  const shown = filtered.slice(0,6);
+  const rows = shown.map(p=>{
+    const cached = ttrCache[p.id];
+    const ttrLabel = cached?.ttr!=null ? (cached.ttr<60?'<span class="ttr-pill ttr-bad">'+cached.ttr.toFixed(1)+'%</span>':'<span class="ttr-pill ttr-good">'+cached.ttr.toFixed(1)+'%</span>') : '<span class="ttr-pill ttr-none">--</span>';
+    return `<div class="dash-patient-row" onclick="selectPatient('${p.id}')">
+      <div>
+        <div class="dash-patient-name">${escapeHtml(p.name)}</div>
+        <div class="dash-patient-meta">${escapeHtml(p.mrn)}${p.indication?' · '+escapeHtml(p.indication):''}</div>
+      </div>
+      ${ttrLabel}
+    </div>`;
+  }).join('');
+  const more = filtered.length>6 ? `<span class="dash-viewall" onclick="switchView('patients')">View all ${filtered.length} patients →</span>` : '';
+  return `<div class="dash-card">
+    <div class="dash-card-header">
+      <div class="dash-card-title">Patients</div>
+      <div class="dash-card-icon" style="background:#EFF3F8;">👤</div>
+    </div>
+    <div class="dash-card-body">
+      <input class="dash-search" id="dashPtSearch" placeholder="Search name or MRN…" oninput="onDashSearch(this.value)">
+      <div id="dashPtList">${rows||'<div class="dash-empty">No active patients found.</div>'}</div>
+      ${more}
+    </div>
+  </div>`;
+}
+
+function onDashSearch(q){
+  const pts = [...patients].filter(p=>p.isActive!==false).sort((a,b)=>a.name.localeCompare(b.name));
+  const filtered = q ? pts.filter(p=>p.name.toLowerCase().includes(q.toLowerCase())||p.mrn.toLowerCase().includes(q.toLowerCase())) : pts;
+  const shown = filtered.slice(0,6);
+  const rows = shown.map(p=>{
+    const cached = ttrCache[p.id];
+    const ttrLabel = cached?.ttr!=null ? (cached.ttr<60?'<span class="ttr-pill ttr-bad">'+cached.ttr.toFixed(1)+'%</span>':'<span class="ttr-pill ttr-good">'+cached.ttr.toFixed(1)+'%</span>') : '<span class="ttr-pill ttr-none">--</span>';
+    return `<div class="dash-patient-row" onclick="selectPatient('${p.id}')">
+      <div><div class="dash-patient-name">${escapeHtml(p.name)}</div>
+      <div class="dash-patient-meta">${escapeHtml(p.mrn)}${p.indication?' · '+escapeHtml(p.indication):''}</div></div>
+      ${ttrLabel}
+    </div>`;
+  }).join('');
+  const listEl = document.getElementById("dashPtList");
+  if(listEl) listEl.innerHTML = rows || '<div class="dash-empty">No patients match.</div>';
+}
+
+async function buildApptCard(dateStr){
+  const appts = [];
+  for(const p of patients){
+    if(p.isActive===false) continue;
+    const visits = await loadVisits(p.id);
+    const sorted = [...visits].filter(v=>v.nextAppt===dateStr);
+    if(sorted.length===0) continue;
+    const reviewed = isVisitReviewedForAppt(visits.filter(v=>v.date>sorted[0].date||(v.date>=dateStr&&v.id!==sorted[0].id)), dateStr);
+    const hasVisitToday = visits.some(v=>v.date===dateStr);
+    appts.push({p, reviewed: hasVisitToday, lastINR: sorted[0].inr});
+  }
+  appts.sort((a,b)=>a.p.name.localeCompare(b.p.name));
+  const rows = appts.map(a=>`
+    <div class="dash-appt-row">
+      <div>
+        <div class="dash-appt-name" onclick="selectPatient('${a.p.id}')">${escapeHtml(a.p.name)}</div>
+        <div class="dash-patient-meta">${escapeHtml(a.p.mrn)}${a.lastINR?' · Last INR: '+a.lastINR:''}</div>
+      </div>
+      ${a.reviewed
+        ? '<span class="dash-status-done">✓ Reviewed</span>'
+        : '<span class="dash-status-pending">⏳ Pending</span>'}
+    </div>`).join('');
+  const apptCount = appts.length;
+  const pendingCount = appts.filter(a=>!a.reviewed).length;
+  return `<div class="dash-card">
+    <div class="dash-card-header">
+      <div class="dash-card-title">Appointments</div>
+      <div class="dash-card-icon" style="background:#EFF8F5;">📅</div>
+    </div>
+    <div class="dash-card-body">
+      <div style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">
+        <input type="date" id="dashApptDate" value="${dateStr}" style="border:1px solid var(--line); border-radius:8px; padding:6px 10px; font-size:13px; background:#FCFBF7;" onchange="refreshApptCard(this.value)">
+        <span style="font-size:12px; color:var(--ink-soft);">${apptCount} patient${apptCount!==1?'s':''} · ${pendingCount} pending</span>
+      </div>
+      <div id="dashApptList">${rows||'<div class="dash-empty">No appointments on this date.</div>'}</div>
+      <span class="dash-viewall" onclick="generateAppointmentList()">Print appointment list →</span>
+    </div>
+  </div>`;
+}
+
+async function refreshApptCard(dateStr){
+  const listEl = document.getElementById("dashApptList");
+  const dateEl = document.getElementById("dashApptDate");
+  if(!listEl) return;
+  listEl.innerHTML = '<div class="dash-empty">Loading…</div>';
+  const appts = [];
+  for(const p of patients){
+    if(p.isActive===false) continue;
+    const visits = await loadVisits(p.id);
+    const thisDateAppt = visits.filter(v=>v.nextAppt===dateStr);
+    if(!thisDateAppt.length) continue;
+    const hasVisitToday = visits.some(v=>v.date===dateStr);
+    appts.push({p, reviewed:hasVisitToday, lastINR:thisDateAppt[0].inr});
+  }
+  appts.sort((a,b)=>a.p.name.localeCompare(b.p.name));
+  const rows = appts.map(a=>`
+    <div class="dash-appt-row">
+      <div>
+        <div class="dash-appt-name" onclick="selectPatient('${a.p.id}')">${escapeHtml(a.p.name)}</div>
+        <div class="dash-patient-meta">${escapeHtml(a.p.mrn)}${a.lastINR?' · Last INR: '+a.lastINR:''}</div>
+      </div>
+      ${a.reviewed?'<span class="dash-status-done">✓ Reviewed</span>':'<span class="dash-status-pending">⏳ Pending</span>'}
+    </div>`).join('');
+  listEl.innerHTML = rows || '<div class="dash-empty">No appointments on this date.</div>';
+  const countEl = dateEl?.nextElementSibling;
+  if(countEl){ const p=appts.length,pe=appts.filter(a=>!a.reviewed).length; countEl.textContent=p+' patient'+(p!==1?'s':'')+' · '+pe+' pending'; }
+}
+
+function buildDefaulterCard(overdue, missingAppt){
+  const all = [...overdue.slice(0,4), ...missingAppt.filter(d=>d.isReferral).slice(0,2)];
+  const rows = all.map(d=>`
+    <div class="dash-defaulter-row" onclick="selectPatient('${d.patient.id}')">
+      <div>
+        <div class="dash-defaulter-name">${escapeHtml(d.patient.name)}</div>
+        <div class="dash-defaulter-meta">${escapeHtml(d.patient.mrn)}${d.daysOverdue?' · '+d.daysOverdue+'d overdue':(d.isReferral?' · Refer MOPD — no TCA set':'')}</div>
+      </div>
+      <span class="overdue-badge ${d.daysOverdue>30?'overdue-hi':d.daysOverdue>14?'overdue-mid':'overdue-lo'}">${d.daysOverdue?d.daysOverdue+'d':'No TCA'}</span>
+    </div>`).join('');
+  const total = overdue.length + missingAppt.length;
+  return `<div class="dash-card">
+    <div class="dash-card-header">
+      <div class="dash-card-title">Defaulters <span style="background:#F3E3DF;color:var(--accent);border-radius:20px;padding:1px 8px;font-size:11px;font-weight:700;margin-left:4px;">${total}</span></div>
+      <div class="dash-card-icon" style="background:#F9EDEB;">⏰</div>
+    </div>
+    <div class="dash-card-body">
+      ${rows || '<div class="dash-empty">No defaulters — great job! 🎉</div>'}
+      ${total>0?`<span class="dash-viewall" onclick="switchView('defaulters')">View all ${total} defaulters →</span>`:''}
+    </div>
+  </div>`;
+}
+
+function buildTTRSummaryCard(){
+  const included = patients.filter(p=>!p.ttrExcluded&&p.isActive!==false).map(p=>({p,ttr:ttrCache[p.id]?.ttr??null})).filter(d=>d.ttr!==null);
+  const avgTTR = included.length ? included.reduce((s,d)=>s+d.ttr,0)/included.length : null;
+  const below60 = included.filter(d=>d.ttr<60).sort((a,b)=>a.ttr-b.ttr);
+  const pct = included.length ? Math.round(below60.length/included.length*100) : 0;
+  const avgClass = avgTTR===null?'var(--ink)':avgTTR<60?'var(--accent)':'var(--good)';
+  const worstRows = below60.slice(0,4).map(d=>`
+    <div class="dash-ttr-row">
+      <div class="dash-ttr-name" onclick="selectPatient('${d.p.id}')">${escapeHtml(d.p.name)}</div>
+      <span class="badge badge-bad">${d.ttr.toFixed(1)}%</span>
+    </div>`).join('');
+  return `<div class="dash-card">
+    <div class="dash-card-header">
+      <div class="dash-card-title">TTR overview</div>
+      <div class="dash-card-icon" style="background:#EFF3FB;">📊</div>
+    </div>
+    <div class="dash-card-body">
+      <div class="dash-stat-row">
+        <div class="dash-stat"><div class="dash-stat-val" style="color:${avgClass};">${avgTTR===null?'—':avgTTR.toFixed(1)+'%'}</div><div class="dash-stat-lbl">Avg TTR</div></div>
+        <div class="dash-stat"><div class="dash-stat-val" style="color:${below60.length>0?'var(--accent)':'var(--good)'};">${below60.length}</div><div class="dash-stat-lbl">Below 60%</div></div>
+        <div class="dash-stat"><div class="dash-stat-val">${included.length}</div><div class="dash-stat-lbl">Patients</div></div>
+      </div>
+      ${worstRows||'<div class="dash-empty">No TTR data yet — add reviews to get started.</div>'}
+      <span class="dash-viewall" onclick="switchView('ttr')">Full TTR report →</span>
+    </div>
+  </div>`;
+}
+
+// ── Main render ──
 function getSpecialFlags(p, visits){
   const flags = [];
   const today = new Date(); today.setHours(0,0,0,0);
@@ -1052,7 +1453,7 @@ async function renderMain(){
   const main = document.getElementById("main");
   if(!configOk){ main.innerHTML = configWarningHtml(); return; }
   if(!currentPatientId){
-    main.innerHTML = '<div class="placeholder"><h1>Select or add a patient</h1><p>Track INR reviews, dosing decisions and ward admissions per patient. TTR is calculated automatically with the Rosendaal method.</p></div>';
+    await renderDashboard();
     return;
   }
   const p = patients.find(x => x.id === currentPatientId);
@@ -1114,13 +1515,14 @@ async function renderMain(){
     '</div>'+
     statusStrip+passoverHtml+flagsHtml+alertHtml+
     '<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:4px;">'+
-      '<div class="tabs" style="margin-bottom:0; border-bottom:none;">'+tabBtn('profile','Patient info')+tabBtn('review','New review')+tabBtn('history','History & TTR')+'</div>'+
+      '<div class="tabs" style="margin-bottom:0; border-bottom:none;">'+tabBtn('profile','Patient info')+tabBtn('review','New review')+tabBtn('history','History & TTR')+tabBtn('audit','Audit log')+'</div>'+
       '<button class="btn" style="font-size:12px; padding:6px 14px;" onclick="generatePatientReport()">⬇ Patient report</button>'+
     '</div>'+
     '<div style="border-bottom:1px solid var(--line); margin-bottom:22px;"></div>'+
     '<div id="panelProfile" class="panel"></div>'+
     '<div id="panelReview" class="panel"></div>'+
-    '<div id="panelHistory" class="panel"></div>';
+    '<div id="panelHistory" class="panel"></div>'+
+    '<div id="panelAudit" class="panel"></div>';
 
   renderProfilePanel(p);
   await renderReviewPanel(p);
@@ -1140,6 +1542,11 @@ function showTab(key){
   document.getElementById("panelProfile").classList.toggle("active", key==="profile");
   document.getElementById("panelReview").classList.toggle("active", key==="review");
   document.getElementById("panelHistory").classList.toggle("active", key==="history");
+  const auditEl = document.getElementById("panelAudit");
+  if(auditEl){
+    auditEl.classList.toggle("active", key==="audit");
+    if(key==="audit") renderAuditPanel(currentPatientId);
+  }
 }
 
 // ---------- Profile panel ----------
@@ -1502,18 +1909,33 @@ async function saveReview(){
   };
 
   if(editingVisitId){
-    // Upsert to DB, then update cache directly (avoids stale re-fetch race)
+    // ── Optimistic lock: check if another user edited since we loaded ──
+    const cachedVisit = (visitsCache[currentPatientId]||[]).find(v=>v.id===editingVisitId);
+    const conflict = await checkVisitConflict(editingVisitId, cachedVisit?.updatedAt);
+    if(conflict){
+      const proceed = confirm(
+        "⚠ Conflict detected: another reviewer has edited this review since you opened it.\n\n"+
+        "Click OK to overwrite their changes with yours, or Cancel to discard your changes and reload."
+      );
+      if(!proceed){
+        editingVisitId = null;
+        delete visitsCache[currentPatientId]; // force fresh fetch
+        await renderMain(); showTab("history"); return;
+      }
+    }
     await upsertVisitRow(currentPatientId, visit);
     if(!visitsCache[currentPatientId]) visitsCache[currentPatientId] = [];
     const idx = visitsCache[currentPatientId].findIndex(v=>v.id===editingVisitId);
     if(idx>=0) visitsCache[currentPatientId][idx] = visit;
     else visitsCache[currentPatientId].push(visit);
     editingVisitId = null;
+    invalidateTTRCache(currentPatientId);
     showToast("Review updated ✓","success",2000);
   } else {
     await insertVisitRow(currentPatientId, visit);
     if(!visitsCache[currentPatientId]) visitsCache[currentPatientId] = [];
     visitsCache[currentPatientId].push(visit);
+    invalidateTTRCache(currentPatientId);
   }
 
   await renderPatientList();
@@ -1603,8 +2025,7 @@ async function deleteReview(visitId){
   if(!confirm("Delete this review? This cannot be undone.")) return;
   const ok = await deleteVisitRow(visitId);
   if(!ok) return;
-  const visits = await loadVisits(currentPatientId);
-  visitsCache[currentPatientId] = visits.filter(v=>v.id!==visitId);
+  invalidateTTRCache(currentPatientId);
   await renderPatientList();
   await renderMain();
   showTab("history");
@@ -2802,6 +3223,55 @@ async function exportAppointmentExcel(){
   const filename = 'Appointment_List_'+new Date().toISOString().slice(0,10)+'.xlsx';
   XLSX.writeFile(wb, filename);
   showToast("Excel file downloaded: "+filename,"success",3000);
+}
+
+// ── Audit log panel ──
+async function renderAuditPanel(patientId){
+  const el = document.getElementById("panelAudit");
+  if(!el) return;
+  el.innerHTML = '<div class="card"><h3>Audit log</h3><div class="empty-state">Loading…</div></div>';
+
+  // Fetch logs for this patient record and all their visits
+  const visits = await loadVisits(patientId);
+  const visitIds = visits.map(v=>v.id);
+  const allIds = [patientId, ...visitIds];
+
+  // Fetch audit entries for all related records
+  let logs = [];
+  try{
+    const {data} = await sb.from("audit_log")
+      .select("*")
+      .in("record_id", allIds)
+      .order("created_at", {ascending:false})
+      .limit(100);
+    logs = data||[];
+  }catch(e){ logs=[]; }
+
+  if(!logs.length){
+    el.innerHTML = '<div class="card"><h3>Audit log</h3><div class="empty-state">No audit entries yet. Changes made from here on will be logged.</div></div>';
+    return;
+  }
+
+  const actionBadge = a => a==='INSERT'?'<span class="badge badge-good">Created</span>':a==='UPDATE'?'<span class="badge" style="background:#EDF2FB;color:#2C5282;">Updated</span>':'<span class="badge badge-bad">Deleted</span>';
+
+  const rows = logs.map(l=>{
+    const dt = new Date(l.created_at).toLocaleString();
+    const target = l.table_name==='patients' ? 'Patient record' : 'Visit '+( visits.find(v=>v.id===l.record_id)?.date||l.record_id.slice(0,8));
+    const details = l.payload ? Object.entries(l.payload).filter(([,v])=>v!=null).map(([k,v])=>`<span class="tag">${escapeHtml(k)}: ${escapeHtml(String(v))}</span>`).join(' ') : '';
+    return `<tr>
+      <td style="font-size:11.5px;white-space:nowrap;">${dt}</td>
+      <td>${actionBadge(l.action)}</td>
+      <td style="font-size:12px;">${escapeHtml(target)}</td>
+      <td style="font-size:12px;font-weight:600;">${escapeHtml(l.reviewer_name||l.changed_by||'—')}</td>
+      <td style="font-size:11px;">${details}</td>
+    </tr>`;
+  }).join('');
+
+  el.innerHTML =
+    '<div class="card"><h3>Audit log <span style="font-size:11px;font-weight:400;color:var(--ink-soft);">— last 100 changes to this patient record and reviews</span></h3>'+
+    '<div class="table-scroll"><table class="history"><thead><tr>'+
+      '<th>Date / time</th><th>Action</th><th>Record</th><th>By</th><th>Fields changed</th>'+
+    '</tr></thead><tbody>'+rows+'</tbody></table></div></div>';
 }
 
 async function renderSettingsView(){
