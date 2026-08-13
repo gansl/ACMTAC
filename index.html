@@ -21,8 +21,14 @@
   body{margin:0; font-family:var(--sans); background:var(--paper); color:var(--ink); -webkit-font-smoothing:antialiased;}
   a{color:inherit;}
   .app{display:flex; flex-direction:column; min-height:100vh;}
-  /* Sidebar: mobile-only drawer, hidden on desktop */
-  .sidebar{width:300px; flex-shrink:0; background:var(--ink); color:#F1EEE5; display:flex; flex-direction:column; padding:20px 16px;}
+  /* Sidebar: hidden by default, shown only as mobile drawer */
+  .sidebar{
+    display:none; position:fixed; top:0; left:0; width:82%; max-width:310px;
+    height:100%; z-index:100; padding:16px 14px 80px; overflow-y:auto;
+    background:var(--ink); color:#F1EEE5; flex-direction:column;
+    transition:left 0.22s ease;
+  }
+  .sidebar.open{ display:flex; }
   /* Desktop top navigation bar */
   .desktop-topbar{
     display:flex; align-items:center; gap:12px;
@@ -1073,14 +1079,18 @@ function getRuleSuggestion(inr, low, high, rules, currentTwd){
 function switchView(view){
   if(view !== currentView) pushNav(view, null, null);
   currentView = view;
-  document.getElementById("navPatients").classList.toggle("active", view==="patients");
-  document.getElementById("navTTR").classList.toggle("active", view==="ttr");
-  document.getElementById("navDefaulters").classList.toggle("active", view==="defaulters");
-  document.getElementById("navAnalysis").classList.toggle("active", view==="analysis");
-  document.getElementById("navSettings").classList.toggle("active", view==="settings");
+  currentPatientId = null;
+  ["navPatients","navTTR","navDefaulters","navAnalysis","navSettings"].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.classList.toggle("active", id==="nav"+view.charAt(0).toUpperCase()+view.slice(1));
+  });
+  document.getElementById("navPatients")?.classList.toggle("active", view==="patients");
+  document.getElementById("navTTR")?.classList.toggle("active", view==="ttr");
+  document.getElementById("navDefaulters")?.classList.toggle("active", view==="defaulters");
+  document.getElementById("navAnalysis")?.classList.toggle("active", view==="analysis");
+  document.getElementById("navSettings")?.classList.toggle("active", view==="settings");
   syncMobileTabs(view);
-  updateBreadcrumb(view, view==="patients"?currentPatientId:null, currentTab);
-  if(view==="patients") renderMain();
+  updateBreadcrumb(view, null, null);
+  if(view==="patients") showAllPatients("");
   else if(view==="ttr") renderTTROverview();
   else if(view==="defaulters") renderDefaultersView();
   else if(view==="analysis") renderAnalysisView();
@@ -1352,7 +1362,90 @@ async function selectPatient(id){
   await renderMain();
 }
 
-// ── Dashboard helpers ──
+async function showAllPatients(q){
+  const main = document.getElementById("main");
+  if(!configOk){ main.innerHTML = configWarningHtml(); return; }
+  pushNav("allpatients", null, null);
+  updateBreadcrumb("All patients");
+  const backBtn = document.getElementById("backBtn");
+  if(backBtn) backBtn.style.display = "inline-flex";
+
+  const pts = [...patients].filter(p=>p.isActive!==false).sort((a,b)=>a.name.localeCompare(b.name));
+
+  function buildRows(list){
+    return list.map(p=>{
+      const cached = ttrCache[p.id];
+      const status = cached?.status;
+      const statusColor = !status||status.type==='defaulter'?'#E89189':(status.type==='today'?'#F0C96B':'var(--ink-soft)');
+      const ttrLabel = cached?.ttr!=null
+        ? (cached.ttr<60?'<span class="ttr-pill ttr-bad">TTR '+cached.ttr.toFixed(1)+'%</span>':'<span class="ttr-pill ttr-good">TTR '+cached.ttr.toFixed(1)+'%</span>')
+        : '<span class="ttr-pill ttr-none">TTR --</span>';
+      return `<div class="dash-patient-row" style="border:1px solid var(--line); border-radius:10px; margin-bottom:6px; padding:10px 12px;" onclick="selectPatient('${p.id}')">
+        <div>
+          <div class="dash-patient-name">${escapeHtml(p.name)}${p.passoverNotes?'<span title="Has passover notes" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#E6A800;margin-left:6px;vertical-align:middle;"></span>':''}</div>
+          <div class="dash-patient-meta">${escapeHtml(p.mrn)}${p.indication?' · '+escapeHtml(p.indication):''}${status?.label?'<span style="color:'+statusColor+';margin-left:6px;">· '+escapeHtml(status.label)+'</span>':''}</div>
+        </div>
+        ${ttrLabel}
+      </div>`;
+    }).join('');
+  }
+
+  const initialRows = buildRows(pts);
+
+  main.innerHTML =
+    '<div style="padding:24px 32px 40px; max-width:860px;">'+
+      '<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; flex-wrap:wrap; gap:10px;">'+
+        '<div><div style="font-family:var(--serif);font-size:22px;font-weight:600;color:var(--ink);">All patients</div><div style="font-size:13px;color:var(--ink-soft);margin-top:2px;">'+pts.length+' active patients</div></div>'+
+        '<button class="btn btn-primary" onclick="openNewPatientModal()" style="font-size:13px; padding:9px 18px;">+ Add patient</button>'+
+      '</div>'+
+      '<input id="allPtSearch" class="dash-search" placeholder="Search name or MRN…" oninput="filterAllPatients(this.value)" style="margin-bottom:14px;">'+
+      '<div id="allPtList">'+initialRows+'</div>'+
+    '</div>';
+
+  // Lazy fill TTR in background
+  const uncached = pts.filter(p=>!ttrCache[p.id]);
+  for(const p of uncached){
+    setTimeout(async()=>{
+      const visits = await loadVisits(p.id);
+      const ttr = calcTTR(visits,parseFloat(p.targetLow),parseFloat(p.targetHigh));
+      const status = getPatientStatus(visits);
+      ttrCache[p.id]={ttr,status};
+      // Re-render the specific row
+      const listEl = document.getElementById("allPtList");
+      if(listEl && !document.getElementById("allPtSearch")?.value){
+        listEl.innerHTML = buildRows([...patients].filter(p=>p.isActive!==false).sort((a,b)=>a.name.localeCompare(b.name)));
+      }
+    },0);
+  }
+}
+
+function filterAllPatients(q){
+  const pts = [...patients].filter(p=>p.isActive!==false).sort((a,b)=>a.name.localeCompare(b.name));
+  const filtered = q ? pts.filter(p=>p.name.toLowerCase().includes(q.toLowerCase())||p.mrn.toLowerCase().includes(q.toLowerCase())) : pts;
+  const listEl = document.getElementById("allPtList");
+  if(!listEl) return;
+  if(!filtered.length){
+    listEl.innerHTML =
+      '<div class="dash-empty">No patient found for "'+escapeHtml(q)+'".</div>'+
+      '<button class="btn btn-primary" style="width:100%;margin-top:8px;font-size:13px;" onclick="openNewPatientFromSearch(\''+escapeHtml(q)+'\')">+ Add "'+escapeHtml(q)+'" as new patient</button>';
+    return;
+  }
+  listEl.innerHTML = filtered.map(p=>{
+    const cached = ttrCache[p.id];
+    const status = cached?.status;
+    const statusColor = !status||status.type==='defaulter'?'#E89189':(status.type==='today'?'#F0C96B':'var(--ink-soft)');
+    const ttrLabel = cached?.ttr!=null
+      ?(cached.ttr<60?'<span class="ttr-pill ttr-bad">TTR '+cached.ttr.toFixed(1)+'%</span>':'<span class="ttr-pill ttr-good">TTR '+cached.ttr.toFixed(1)+'%</span>')
+      :'<span class="ttr-pill ttr-none">TTR --</span>';
+    return `<div class="dash-patient-row" style="border:1px solid var(--line);border-radius:10px;margin-bottom:6px;padding:10px 12px;" onclick="selectPatient('${p.id}')">
+      <div>
+        <div class="dash-patient-name">${escapeHtml(p.name)}</div>
+        <div class="dash-patient-meta">${escapeHtml(p.mrn)}${p.indication?' · '+escapeHtml(p.indication):''}${status?.label?'<span style="color:'+statusColor+';margin-left:6px;">· '+escapeHtml(status.label)+'</span>':''}</div>
+      </div>
+      ${ttrLabel}
+    </div>`;
+  }).join('');
+}
 function getGreeting(){
   const h = new Date().getHours();
   if(h<12) return "Good morning";
@@ -1418,7 +1511,7 @@ function buildPatientsCard(pts, q){
       ${ttrLabel}
     </div>`;
   }).join('');
-  const more = filtered.length>6 ? `<span class="dash-viewall" onclick="switchView('patients')">View all ${filtered.length} patients →</span>` : '';
+  const more = filtered.length>6 ? `<span class="dash-viewall" onclick="showAllPatients('')">View all ${filtered.length} patients →</span>` : '';
   return `<div class="dash-card">
     <div class="dash-card-header">
       <div class="dash-card-title">Patients</div>
@@ -2027,7 +2120,7 @@ async function saveReview(){
     }
   }
 
-  if(!nextAppt){
+  if(!nextAppt && planAction !== "refer_mopd"){
     errors.push("Next appointment date is required.");
   }
 
