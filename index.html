@@ -1353,11 +1353,17 @@ async function selectPatient(id){
   pushNav("patients", id, "profile");
   currentPatientId = id;
   currentTab = "profile";
+  currentView = "patients";
+  // Close mobile sidebar if open
   const sb2 = document.getElementById("sidebar");
   const ov = document.getElementById("sidebarOverlay");
   if(sb2) sb2.classList.remove("open");
   if(ov) ov.classList.remove("show");
-  switchView("patients");
+  // Highlight nav without triggering view switch
+  ["navPatients","navTTR","navDefaulters","navAnalysis","navSettings"].forEach(id2=>{
+    const el=document.getElementById(id2); if(el) el.classList.toggle("active", id2==="navPatients");
+  });
+  syncMobileTabs("patients");
   await renderPatientList();
   await renderMain();
 }
