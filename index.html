@@ -719,6 +719,7 @@ function setupRealtime(){
       if(newRow?.reviewer && newRow.reviewer === (currentReviewerName||currentUserEmail)) return;
       // Invalidate and optionally notify
       invalidateTTRCache(patientId);
+      delete visitsCache[patientId]; // stale visit list must be refetched, or schedule counts / patient panels won't reflect the change
       if(eventType==='INSERT'){
         if(patientId !== currentPatientId){
           const p = patients.find(x=>x.id===patientId);
@@ -729,6 +730,14 @@ function setupRealtime(){
       if(patientId === currentPatientId){
         await renderMain();
         showTab(currentTab);
+      }
+      // If viewing the schedule grid, refresh it so the new/changed appointment is counted
+      if(currentView === "schedule"){
+        await renderScheduleView();
+      }
+      // If sitting on the home dashboard, refresh it too (appointments + schedule cards)
+      if(currentView === "patients" && !currentPatientId){
+        await renderDashboard();
       }
       renderPatientList();
     })
@@ -867,10 +876,10 @@ function patientToRow(p){
   return {id:p.id, name:p.name, mrn:p.mrn, phone:p.phone, indication:p.indication, target_low:p.targetLow, target_high:p.targetHigh, duration:p.duration, notes:p.notes||"", passover_notes:p.passoverNotes||"", initiation_date:p.initiationDate||null, is_active:p.isActive!==false, ttr_excluded:p.ttrExcluded||false, ttr_exclude_reason:p.ttrExcludeReason||""};
 }
 function rowToVisit(r){
-  return {id:r.id, date:r.date, twd:r.twd, inr:r.inr, factors:r.factors||[], factorNotes:r.factor_notes||{}, admitDate:r.admit_date||"", admitDx:r.admit_dx||"", planAction:r.plan_action, planDays:r.plan_days, planLoadMg:r.plan_load_mg, planSubAction:r.plan_sub_action||"", planSubPct:r.plan_sub_pct, newTwd:r.new_twd, nextAppt:r.next_appt||"", clinicalNote:r.clinical_note||"", regimeLabel:r.regime_label||"", inrDayBefore:r.inr_day_before||false, longerTca:r.longer_tca||false, reviewer:r.reviewer||"", updatedAt:r.updated_at||null};
+  return {id:r.id, date:r.date, twd:r.twd, inr:r.inr, factors:r.factors||[], factorNotes:r.factor_notes||{}, admitDate:r.admit_date||"", admitDx:r.admit_dx||"", planAction:r.plan_action, planDays:r.plan_days, planLoadMg:r.plan_load_mg, planSubAction:r.plan_sub_action||"", planSubPct:r.plan_sub_pct, newTwd:r.new_twd, nextAppt:r.next_appt||"", clinicalNote:r.clinical_note||"", regimeLabel:r.regime_label||"", inrDayBefore:r.inr_day_before||false, longerTca:r.longer_tca||false, caseDiscussedDr:r.case_discussed_dr||false, doctorName:r.doctor_name||"", reviewer:r.reviewer||"", updatedAt:r.updated_at||null};
 }
 function visitToRow(v, patientId){
-  return {id:v.id, patient_id:patientId, date:v.date||null, twd:v.twd||null, inr:v.inr||null, factors:v.factors||[], factor_notes:v.factorNotes||{}, admit_date:v.admitDate||null, admit_dx:v.admitDx||null, plan_action:v.planAction||null, plan_days:v.planDays||null, plan_load_mg:v.planLoadMg||null, plan_sub_action:v.planSubAction||null, plan_sub_pct:v.planSubPct||null, new_twd:v.newTwd||null, next_appt:v.nextAppt||null, clinical_note:v.clinicalNote||null, regime_label:v.regimeLabel||null, inr_day_before:v.inrDayBefore||false, longer_tca:v.longerTca||false, reviewer:v.reviewer||null};
+  return {id:v.id, patient_id:patientId, date:v.date||null, twd:v.twd||null, inr:v.inr||null, factors:v.factors||[], factor_notes:v.factorNotes||{}, admit_date:v.admitDate||null, admit_dx:v.admitDx||null, plan_action:v.planAction||null, plan_days:v.planDays||null, plan_load_mg:v.planLoadMg||null, plan_sub_action:v.planSubAction||null, plan_sub_pct:v.planSubPct||null, new_twd:v.newTwd||null, next_appt:v.nextAppt||null, clinical_note:v.clinicalNote||null, regime_label:v.regimeLabel||null, inr_day_before:v.inrDayBefore||false, longer_tca:v.longerTca||false, case_discussed_dr:v.caseDiscussedDr||false, doctor_name:v.doctorName||null, reviewer:v.reviewer||null};
   // Note: updated_at is managed by Postgres (default now()), not sent by client
 }
 
@@ -1500,6 +1509,9 @@ async function renderDashboard(){
   // ── 4. TTR card ──
   const ttrCardHtml = buildTTRSummaryCard();
 
+  // ── 5. Clinic schedule card (next 4 Thursdays) ──
+  const scheduleCardHtml = await buildScheduleSummaryCard();
+
   main.innerHTML =
     '<div class="dashboard">'+
       '<div class="greeting">'+
@@ -1512,6 +1524,7 @@ async function renderDashboard(){
         apptCardHtml+
         defaulterCardHtml+
         ttrCardHtml+
+        scheduleCardHtml+
       '</div>'+
     '</div>';
 }
@@ -1722,6 +1735,43 @@ function buildTTRSummaryCard(){
       </div>
       ${worstRows||'<div class="dash-empty">No TTR data yet — add reviews to get started.</div>'}
       <span class="dash-viewall" onclick="switchView('ttr')">Full TTR report →</span>
+    </div>
+  </div>`;
+}
+
+async function buildScheduleSummaryCard(){
+  const {sessionConfigs, countByDate} = await getScheduleCounts();
+  const thursdays = getNext12Thursdays().slice(0,4);
+
+  const rows = thursdays.map(d=>{
+    const dateStr = d.toISOString().slice(0,10);
+    const dd = String(d.getDate()).padStart(2,'0');
+    const mm = String(d.getMonth()+1).padStart(2,'0');
+    const yyyy = d.getFullYear();
+    const displayDate = `${dd}/${mm}/${yyyy}`;
+    const cfg = sessionConfigs[dateStr]||{maxPatients:30, notes:"", noInrDay:false};
+    const count = countByDate[dateStr]||0;
+    const max = cfg.maxPatients||30;
+    const pct = count/max;
+    const dotColor = pct>=1?'#C0392B':pct>=0.9?'#F1C40F':'var(--good)';
+    const noteTag = cfg.notes ? `<span class="tag" style="background:#FEF3E7;color:#7A4A0A;margin-left:6px;">${escapeHtml(cfg.notes)}</span>` : '';
+    return `<div class="dash-appt-row" style="cursor:pointer;" onclick="filterApptByDate('${dateStr}')">
+      <div>
+        <div class="dash-appt-name">${displayDate}${noteTag}</div>
+        <div class="dash-patient-meta">${count} / ${max} patients booked</div>
+      </div>
+      <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:${dotColor};"></span>
+    </div>`;
+  }).join('');
+
+  return `<div class="dash-card">
+    <div class="dash-card-header">
+      <div class="dash-card-title">Clinic Schedule</div>
+      <div class="dash-card-icon" style="background:#F5EFFB;">🗓️</div>
+    </div>
+    <div class="dash-card-body">
+      ${rows || '<div class="dash-empty">No upcoming Thursdays configured.</div>'}
+      <span class="dash-viewall" onclick="switchView('schedule')">View full 12-week schedule →</span>
     </div>
   </div>`;
 }
@@ -2030,6 +2080,12 @@ async function renderReviewPanel(p){
           '<label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; margin-top:8px;">'+
             '<input type="checkbox" id="rv_longer_tca" style="width:16px;height:16px;"> Patient requests longer TCA'+
           '</label>'+
+          '<label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; margin-top:8px;">'+
+            '<input type="checkbox" id="rv_case_discussed" style="width:16px;height:16px;" onchange="onCaseDiscussedToggle()"> Case discussed with Dr'+
+          '</label>'+
+          '<div id="rv_doctor_name_wrap" style="display:none; margin-top:8px; width:100%;">'+
+            '<input type="text" id="rv_doctor_name" placeholder="Doctor\'s name" style="width:100%; padding:8px 10px; border-radius:7px; border:1px solid var(--line); font-size:13px; background:#FCFBF7;">'+
+          '</div>'+
         '</div>'+
       '</div>'+
       '<div class="regime-section" style="margin-top:14px;">'+
@@ -2092,6 +2148,12 @@ function onPlanChange(){
     const newTwdEl=document.getElementById("rv_new_twd");
     if(twdEl&&newTwdEl&&twdEl.value){ newTwdEl.value=twdEl.value; onNewTwdChange(); }
   }
+}
+function onCaseDiscussedToggle(){
+  const checked = document.getElementById("rv_case_discussed")?.checked||false;
+  const wrap = document.getElementById("rv_doctor_name_wrap");
+  if(wrap) wrap.style.display = checked ? "block" : "none";
+  if(!checked){ const el=document.getElementById("rv_doctor_name"); if(el) el.value=""; }
 }
 function onRegimeOtherToggle(){
   const isOther = document.getElementById("rv_regime_other").checked;
@@ -2182,6 +2244,12 @@ async function saveReview(){
     errors.push("Next appointment date is required.");
   }
 
+  const caseDiscussedDr = document.getElementById("rv_case_discussed")?.checked||false;
+  const doctorName = document.getElementById("rv_doctor_name")?.value?.trim()||"";
+  if(caseDiscussedDr && !doctorName){
+    errors.push("Please enter the doctor's name.");
+  }
+
   if(errors.length > 0){
     errors.forEach((e,i) => setTimeout(()=>showToast(e,"error",5000), i*300));
     return;
@@ -2223,6 +2291,7 @@ async function saveReview(){
     id: visitId, date,
     twd: document.getElementById("rv_twd").value,
     inr, factors, factorNotes, inrDayBefore, longerTca,
+    caseDiscussedDr, doctorName,
     admitDate: document.getElementById("rv_admit_date").value,
     admitDx: document.getElementById("rv_admit_dx").value.trim(),
     planAction, planDays, planLoadMg, planSubAction, planSubPct,
@@ -2342,7 +2411,7 @@ function renderHistoryPanel(p, visits, ttr, extTTR){
         '<td><span class="badge '+(inRange?'badge-good':'badge-bad')+'">'+(v.inr||'--')+'</span><br><span style="font-size:11px; color:var(--ink-soft);">TWD '+(v.twd||'--')+'mg</span></td>'+
         '<td>'+(factorsHtml||'<span style="color:var(--ink-soft);">&mdash;</span>')+'</td>'+
         '<td>'+admitHtml+'</td>'+
-        '<td>'+escapeHtml(planLabel(v))+'<br><span style="font-size:11px; color:var(--ink-soft);">New TWD '+(v.newTwd||'--')+'mg</span>'+(v.regimeLabel?'<br><span style="font-size:11px; color:var(--ink-soft); font-style:italic;">'+escapeHtml(v.regimeLabel)+'</span>':'')+'</td>'+
+        '<td>'+escapeHtml(planLabel(v))+'<br><span style="font-size:11px; color:var(--ink-soft);">New TWD '+(v.newTwd||'--')+'mg</span>'+(v.regimeLabel?'<br><span style="font-size:11px; color:var(--ink-soft); font-style:italic;">'+escapeHtml(v.regimeLabel)+'</span>':'')+(v.caseDiscussedDr?'<br><span class="tag" style="background:#EDF3FB; color:#2C5A8C;">Discussed with Dr '+escapeHtml(v.doctorName||'')+'</span>':'')+'</td>'+
         '<td>'+(v.nextAppt||'<span style="color:var(--ink-soft);">&mdash;</span>')+(v.longerTca?' <span class="tag" style="background:#FEF3E7; color:#7A4A0A;">longer TCA</span>':'')+'</td>'+
         '<td style="font-size:11.5px; color:var(--ink-soft);">'+escapeHtml(v.reviewer||'—')+'</td>'+
       '</tr>';
@@ -2406,6 +2475,11 @@ async function editReview(visitId){
   if(inrEl) inrEl.checked = v.inrDayBefore||false;
   const longerEl = document.getElementById("rv_longer_tca");
   if(longerEl) longerEl.checked = v.longerTca||false;
+  const caseDiscussedEl = document.getElementById("rv_case_discussed");
+  if(caseDiscussedEl) caseDiscussedEl.checked = v.caseDiscussedDr||false;
+  const doctorNameEl = document.getElementById("rv_doctor_name");
+  if(doctorNameEl) doctorNameEl.value = v.doctorName||"";
+  onCaseDiscussedToggle();
   selectedRegimeLabel = v.regimeLabel||"";
   // Update save button label
   const btn=document.getElementById("saveReviewBtn"); if(btn) btn.innerText="Update review";
@@ -3663,11 +3737,10 @@ function getNext12Thursdays(){
   return dates;
 }
 
-async function renderScheduleView(){
-  const main = document.getElementById("main");
-  if(!configOk){ main.innerHTML = configWarningHtml(); return; }
-  main.innerHTML = '<div class="sched-header"><h1 style="font-family:var(--serif);font-size:22px;margin:0;">Clinic Schedule</h1><div style="font-size:12px;color:var(--ink-soft);">Loading…</div></div>';
-
+// Shared: patient counts + session config per upcoming Thursday.
+// Used by both the full Schedule view and the compact dashboard card so
+// they can never drift out of sync with each other.
+async function getScheduleCounts(){
   // Load all visits to count per date
   for(const p of patients){ if(!visitsCache[p.id]) await loadVisits(p.id); }
   const sessionConfigs = await fetchSessionConfigs();
@@ -3685,6 +3758,16 @@ async function renderScheduleView(){
     const {data} = await sb.from("defaulter_actions").select("new_tca").eq("action","Contacted — reschedule").not("new_tca","is",null);
     (data||[]).forEach(r=>{ if(r.new_tca) countByDate[r.new_tca]=(countByDate[r.new_tca]||0)+1; });
   }catch(e){}
+
+  return {sessionConfigs, countByDate};
+}
+
+async function renderScheduleView(){
+  const main = document.getElementById("main");
+  if(!configOk){ main.innerHTML = configWarningHtml(); return; }
+  main.innerHTML = '<div class="sched-header"><h1 style="font-family:var(--serif);font-size:22px;margin:0;">Clinic Schedule</h1><div style="font-size:12px;color:var(--ink-soft);">Loading…</div></div>';
+
+  const {sessionConfigs, countByDate} = await getScheduleCounts();
 
   const thursdays = getNext12Thursdays();
   const isAdmin = currentUserRole==="admin";
