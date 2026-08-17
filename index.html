@@ -968,16 +968,27 @@ async function saveRulesRow(rules){
   showToast("Rules saved ✓","success",2000);
 }
 
+// Unified key for a defaulter_actions record: must match EXACTLY between
+// where it's saved (saveDefaulterAction) and where it's looked up
+// (fetchDefaulterActions' map + every render site). Previously the
+// "missing appointment / MOPD referral" rows used a different key format
+// ("<patientId>_noAppt_<date>") than the fetch map ("<patientId>_<date>"),
+// so a saved action/new-TCA could never be read back — it looked like it
+// silently failed to save. Always use this helper, never build the key ad hoc.
+function defaulterKey(patientId, date){
+  return patientId+"_"+date;
+}
 async function fetchDefaulterActions(){
   try{
-    const {data, error} = await sb.from("defaulter_actions").select("*");
-    if(error) return {};
+    const {data, error} = await sb.from("defaulter_actions").select("*").order("created_at",{ascending:false});
+    if(error) return {map:{}, list:[]};
     const map = {};
-    for(const d of data) map[d.patient_id+"_"+d.missed_date] = d;
-    return map;
-  }catch(e){ return {}; }
+    for(const d of data) map[defaulterKey(d.patient_id, d.missed_date)] = d;
+    return {map, list:data||[]};
+  }catch(e){ return {map:{}, list:[]}; }
 }
 async function saveDefaulterAction(patientId, missedDate, action, notes, resolved, newTca){
+  if(!missedDate){ showToast("Missing date — cannot save this action.","error",4000); return; }
   const id = "da_"+patientId+"_"+missedDate.replace(/-/g,"");
   try{
     const {error} = await sb.from("defaulter_actions").upsert({id, patient_id:patientId, missed_date:missedDate, action, notes, resolved, new_tca:newTca||null});
@@ -2640,7 +2651,7 @@ async function renderDefaultersView(){
   }
 
   const {overdue, missingAppt} = getDefaulters(patients, visitsCache);
-  const actions = await fetchDefaulterActions();
+  const {map:actions, list:actionsList} = await fetchDefaulterActions();
 
   const PLAN_LABELS = {continue:"Continue dose", load:"Load dose", withhold:"Withhold dose", refer_mopd:"Refer MOPD"};
 
@@ -2696,7 +2707,7 @@ async function renderDefaultersView(){
   const overdueRows = overdue.length === 0
     ? '<div class="empty-state">No overdue appointments.</div>'
     : colHeaders + overdue.map(d => {
-        const key = d.patient.id+"_"+(d.missedDate||d.lastVisitDate);
+        const key = defaulterKey(d.patient.id, d.missedDate||d.lastVisitDate);
         const badge = `Missed appt: ${escapeHtml(d.missedDate)} ${overdueBadge(d.daysOverdue)}`;
         return actionRow(d, key, badge);
       }).join('');
@@ -2705,7 +2716,7 @@ async function renderDefaultersView(){
   const missingRows = missingAppt.length === 0
     ? '<div class="empty-state">No patients with missing next appointment dates.</div>'
     : colHeaders + missingAppt.map(d => {
-        const key = d.patient.id+"_noAppt_"+d.lastVisitDate;
+        const key = defaulterKey(d.patient.id, d.lastVisitDate);
         const planLabel = PLAN_LABELS[d.planAction]||d.planAction||'—';
         const badge = (d.isReferral
           ? `<span class="overdue-badge overdue-hi">Refer MOPD</span>`
@@ -2713,6 +2724,44 @@ async function renderDefaultersView(){
           + ` Last plan: ${escapeHtml(planLabel)}`;
         return actionRow({...d, missedDate:null}, key, badge);
       }).join('');
+
+  // ── Closed history: records for patients no longer overdue / missing an
+  // appointment (they've since been given a next appointment). The
+  // defaulter_actions row is never deleted — it just moves here instead of
+  // disappearing, so the action taken is never lost.
+  const activeKeys = new Set([
+    ...overdue.map(d=>defaulterKey(d.patient.id, d.missedDate||d.lastVisitDate)),
+    ...missingAppt.map(d=>defaulterKey(d.patient.id, d.lastVisitDate))
+  ]);
+  const closedRecords = actionsList.filter(r => !activeKeys.has(defaulterKey(r.patient_id, r.missed_date)));
+
+  function closedRow(r){
+    const p = patients.find(x=>x.id===r.patient_id);
+    const pName = p ? p.name : 'Unknown patient';
+    const pMrn = p ? p.mrn : r.patient_id;
+    let currentStatusHtml = '';
+    if(p){
+      const visits = visitsCache[p.id]||[];
+      const sorted = [...visits].filter(v=>v.date).sort((a,b)=>new Date(b.date)-new Date(a.date));
+      const last = sorted[0];
+      if(last?.nextAppt) currentStatusHtml = `<div style="font-size:11.5px; color:var(--good); margin-top:2px;">Now scheduled: <b>${escapeHtml(last.nextAppt)}</b></div>`;
+    }
+    return `<div class="defaulter-row" style="opacity:0.85;">
+      <div>
+        <div style="font-weight:600; font-size:13.5px; cursor:pointer; color:var(--accent);" onclick="selectPatient('${escapeHtml(r.patient_id)}')">${escapeHtml(pName)}</div>
+        <div style="font-size:11.5px; color:var(--ink-soft); font-family:var(--mono);">${escapeHtml(pMrn)}</div>
+        <div style="font-size:11.5px; margin-top:3px;">Was missed/pending as of: <b>${escapeHtml(r.missed_date||'—')}</b></div>
+        ${currentStatusHtml}
+      </div>
+      <div style="font-size:12.5px;">${escapeHtml(r.action||'—')}</div>
+      <div style="font-size:12.5px; color:var(--ink-soft);">${escapeHtml(r.notes||'—')}${r.new_tca?'<br><span style="color:var(--ink);">New TCA was: '+escapeHtml(r.new_tca)+'</span>':''}</div>
+      <div><span class="status-badge" style="background:#EDEAE2; color:#6B7A8C; white-space:nowrap;">Closed</span></div>
+    </div>`;
+  }
+
+  const closedRows = closedRecords.length === 0
+    ? '<div class="empty-state">No closed records yet.</div>'
+    : colHeaders + closedRecords.map(closedRow).join('');
 
   main.innerHTML =
     '<div class="patient-header"><div><h1>Defaulter list</h1><div class="meta">Overdue appointments and patients without a scheduled follow-up</div></div>'+
@@ -2731,6 +2780,12 @@ async function renderDefaultersView(){
       '<h3>Missing next appointment <span style="font-size:11px; color:var(--accent); font-weight:400;">— includes MOPD referrals</span></h3>'+
       '<p class="hint" style="margin-bottom:12px;">Patients whose last review had no "Next appointment" date set. Referrals to MOPD are flagged in red — confirm they have been seen or arrange follow-up.</p>'+
       missingRows+
+    '</div>'+
+
+    '<div class="card">'+
+      '<h3>Closed <span style="font-size:11px; color:var(--ink-soft); font-weight:400;">— patient has since been given a next appointment</span></h3>'+
+      '<p class="hint" style="margin-bottom:12px;">Historical record of past defaulter/no-appointment cases and the action taken. Kept for reference even after the patient returned — nothing is deleted.</p>'+
+      closedRows+
     '</div>';
 }
 
@@ -3434,7 +3489,7 @@ async function exportMissedAppointmentExcel(){
   }
 
   const {overdue, missingAppt} = getDefaulters(patients, visitsCache);
-  const actions = await fetchDefaulterActions();
+  const {map:actions} = await fetchDefaulterActions();
 
   // Combine both lists: overdue first, then missing-appt (referrals first)
   const allDefaulters = [
@@ -3444,7 +3499,7 @@ async function exportMissedAppointmentExcel(){
       mrn: d.patient.mrn,
       phone: d.patient.phone||'',
       type: 'Overdue ('+d.daysOverdue+'d)',
-      actionKey: d.patient.id+'_'+d.missedDate
+      actionKey: defaulterKey(d.patient.id, d.missedDate)
     })),
     ...missingAppt.map(d=>({
       missedDate: d.lastVisitDate||'',
@@ -3452,7 +3507,7 @@ async function exportMissedAppointmentExcel(){
       mrn: d.patient.mrn,
       phone: d.patient.phone||'',
       type: d.isReferral ? 'Refer MOPD — no TCA set' : 'No TCA set',
-      actionKey: d.patient.id+'_noAppt_'+d.lastVisitDate
+      actionKey: defaulterKey(d.patient.id, d.lastVisitDate)
     }))
   ];
 
@@ -3478,7 +3533,7 @@ async function exportMissedAppointmentExcel(){
       d.mrn,
       d.phone,
       saved.action || '',
-      '',   // New TCA — blank for manual fill
+      saved.new_tca || '',   // now correctly pulled from the saved defaulter action
       saved.notes || ''
     ];
   });
