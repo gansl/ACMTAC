@@ -129,6 +129,39 @@
   .dash-stat-lbl{font-size:10px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.5px; margin-top:2px;}
   .dash-empty{font-size:13px; color:var(--ink-soft); padding:8px 0; font-style:italic;}
   .dash-viewall{font-size:12px; color:var(--accent); cursor:pointer; font-weight:600; text-align:right; padding:6px 0 0; display:block;}
+  /* Schedule grid */
+  .schedule-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:14px; padding:24px 32px;}
+  .sched-box{border-radius:14px; padding:16px 14px; background:var(--card); border:1px solid var(--line); text-align:center; cursor:pointer; transition:box-shadow 0.15s;}
+  .sched-box:hover{box-shadow:0 2px 12px rgba(0,0,0,0.1);}
+  .sched-box.full{background:#C0392B; border-color:#922B21; color:#fff;}
+  .sched-box.full *{color:#fff!important;}
+  .sched-box.warn{background:#F1C40F; border-color:#D4AC0D; color:#1a1a1a;}
+  .sched-box.warn *{color:#1a1a1a!important;}
+  .sched-box.ok{background:var(--card);}
+  .sched-date{font-size:16px; font-weight:700; margin-bottom:6px;}
+  .sched-note{font-size:11.5px; font-weight:600; margin-bottom:8px; min-height:16px;}
+  .sched-note.nephro{color:#27AE60;}
+  .sched-note.noinr{color:#2980B9;}
+  .sched-count{font-size:18px; font-weight:700; font-family:var(--mono);}
+  .sched-max{font-size:11.5px; color:var(--ink-soft); margin-top:2px;}
+  .sched-header{display:flex; align-items:center; justify-content:space-between; padding:16px 32px 4px; flex-wrap:wrap; gap:10px;}
+  .sched-legend{display:flex; gap:12px; font-size:12px;}
+  .sched-legend span{display:flex; align-items:center; gap:5px;}
+  .leg-dot{width:12px;height:12px;border-radius:3px;display:inline-block;}
+  /* Admin panel */
+  .admin-section{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px 20px; margin-bottom:16px;}
+  .admin-section h3{font-size:13px; text-transform:uppercase; letter-spacing:0.5px; color:var(--ink-soft); margin:0 0 12px;}
+  .user-row{display:flex; align-items:center; justify-content:space-between; padding:9px 0; border-bottom:1px solid var(--line);}
+  .user-row:last-child{border-bottom:none;}
+  .user-email{font-size:13px; font-weight:600;}
+  .user-role-badge{font-size:11px; padding:2px 8px; border-radius:20px; font-weight:700;}
+  .role-admin{background:#EBF5FB; color:#1A5276;}
+  .role-reviewer{background:var(--good-soft); color:var(--good);}
+  @media(max-width:700px){
+    .schedule-grid{grid-template-columns:repeat(2,1fr); gap:10px; padding:12px;}
+    .sched-header{padding:12px 12px 4px;}
+    .sched-date{font-size:14px;}
+  }
   @media(max-width:700px){
     .dashboard{padding:14px 12px 24px;}
     .dash-grid{grid-template-columns:1fr; gap:14px;}
@@ -386,7 +419,9 @@
     <button class="topbar-btn" id="navTTR" onclick="switchView('ttr')">TTR</button>
     <button class="topbar-btn" id="navDefaulters" onclick="switchView('defaulters')">Defaulters</button>
     <button class="topbar-btn" id="navAnalysis" onclick="switchView('analysis')">Analysis</button>
+    <button class="topbar-btn" id="navSchedule" onclick="switchView('schedule')">Schedule</button>
     <button class="topbar-btn" id="navSettings" onclick="switchView('settings')">Dosing rules</button>
+    <button class="topbar-btn admin-only" id="navAdmin" onclick="switchView('admin')" style="display:none;">Admin</button>
     <div id="topbarBreadcrumb" style="font-size:12px; color:#9AA6BC; margin-left:4px;"></div>
     <div class="topbar-right">
       <div class="topbar-dbdot"><span class="db-dot pending" id="dbDot"></span><span id="dbStatusText">Checking…</span></div>
@@ -419,13 +454,13 @@
     </div>
     <div class="db-status" id="dbStatusMobile" style="display:none;"></div>
     <input class="search" id="searchBox" placeholder="Search name or MRN" oninput="renderPatientList()">
-    <button class="btn-add" onclick="openNewPatientModal()">+ Add patient</button>
-    <div class="sidebar-import-row" style="display:flex; gap:6px; margin-bottom:16px;">
+    <button class="btn-add admin-only" onclick="openNewPatientModal()">+ Add patient</button>
+    <div class="sidebar-import-row admin-only" style="display:flex; gap:6px; margin-bottom:16px;">
       <button class="btn" style="flex:1; font-size:11.5px; padding:8px; background:#1E2E48; border-color:#2C3C57; color:#F1EEE5;" onclick="document.getElementById('csvFile').click()">Import CSV</button>
       <button class="btn" style="flex:1; font-size:11.5px; padding:8px; background:#1E2E48; border-color:#2C3C57; color:#F1EEE5;" onclick="downloadCsvTemplate()">Template</button>
     </div>
     <input type="file" id="csvFile" accept=".csv" style="display:none" onchange="handleCsvImport(event)">
-    <div class="sidebar-import-row" style="display:flex; gap:6px; margin-bottom:10px;">
+    <div class="sidebar-import-row admin-only" style="display:flex; gap:6px; margin-bottom:10px;">
       <button class="btn" style="flex:1; font-size:11.5px; padding:8px; background:#1E2E48; border-color:#2C3C57; color:#F1EEE5;" onclick="exportData()">Export</button>
       <button class="btn" style="flex:1; font-size:11.5px; padding:8px; background:#1E2E48; border-color:#2C3C57; color:#F1EEE5;" onclick="document.getElementById('jsonFile').click()">Import</button>
     </div>
@@ -433,64 +468,6 @@
     <div class="patient-list" id="patientList"></div>
     <div class="logout-row">
       <span id="sessionEmailMobile"></span>
-      <span class="logout-link" onclick="logout()">Sign out</span>
-    </div>
-  </div>
-
-  <div class="main" id="main"></div>
-
-  <!-- Mobile bottom tab bar -->
-  <nav class="mobile-tabbar">
-    <button class="mobile-tab active" id="mTabPatients" onclick="mobileSwitchView('patients')">
-      <svg viewBox="0 0 24 24"><use href="#i-user"/></svg>Patients
-    </button>
-    <button class="mobile-tab" id="mTabTTR" onclick="mobileSwitchView('ttr')">
-      <svg viewBox="0 0 24 24"><use href="#i-chart"/></svg>TTR
-    </button>
-    <button class="mobile-tab" id="mTabDefaulters" onclick="mobileSwitchView('defaulters')">
-      <svg viewBox="0 0 24 24"><use href="#i-bell"/></svg>Defaulters
-    </button>
-    <button class="mobile-tab" id="mTabAnalysis" onclick="mobileSwitchView('analysis')">
-      <svg viewBox="0 0 24 24"><use href="#i-cal"/></svg>Analysis
-    </button>
-    <button class="mobile-tab" id="mTabMenu" onclick="toggleSidebar()">
-      <svg viewBox="0 0 24 24"><use href="#i-menu"/></svg>Menu
-    </button>
-  </nav>
-</div>
-    <p class="brand">INR<span>Clinic</span></p>
-    <p class="brand-sub">Anticoagulation tracker</p>
-    <div class="nav-switch" style="flex-wrap:wrap; gap:5px;">
-      <div class="nav-btn active" id="navPatients" onclick="switchView('patients')" style="flex:1 1 70px;">Patients</div>
-      <div class="nav-btn" id="navTTR" onclick="switchView('ttr')" style="flex:1 1 50px;">TTR</div>
-      <div class="nav-btn" id="navDefaulters" onclick="switchView('defaulters')" style="flex:1 1 70px;">Defaulters</div>
-      <div class="nav-btn" id="navAnalysis" onclick="switchView('analysis')" style="flex:1 1 70px;">Analysis</div>
-      <div class="nav-btn" id="navSettings" onclick="switchView('settings')" style="flex:1 1 80px;">Rules</div>
-    </div>
-    <div class="db-status" id="dbStatus"><span class="db-dot pending" id="dbDot"></span><span id="dbStatusText">Checking…</span></div>
-    <input class="search" id="searchBox" placeholder="Search name or MRN" oninput="renderPatientList()">
-    <button class="btn-add" onclick="openNewPatientModal()">+ Add patient</button>
-    <div class="sidebar-import-row" style="display:flex; gap:6px; margin-bottom:16px;">
-      <button class="btn" style="flex:1; font-size:11.5px; padding:8px; background:#1E2E48; border-color:#2C3C57; color:#F1EEE5;" onclick="document.getElementById('csvFile').click()">Import CSV</button>
-      <button class="btn" style="flex:1; font-size:11.5px; padding:8px; background:#1E2E48; border-color:#2C3C57; color:#F1EEE5;" onclick="downloadCsvTemplate()">Template</button>
-    </div>
-    <input type="file" id="csvFile" accept=".csv" style="display:none" onchange="handleCsvImport(event)">
-    <div class="sidebar-import-row" style="display:flex; gap:6px; margin-bottom:10px;">
-      <button class="btn" style="flex:1; font-size:11.5px; padding:8px; background:#1E2E48; border-color:#2C3C57; color:#F1EEE5;" onclick="exportData()">Export data</button>
-      <button class="btn" style="flex:1; font-size:11.5px; padding:8px; background:#1E2E48; border-color:#2C3C57; color:#F1EEE5;" onclick="document.getElementById('jsonFile').click()">Import data</button>
-    </div>
-    <div class="sidebar-reports-row" style="display:flex; gap:6px; margin-bottom:16px;">
-      <button class="btn" style="flex:1; font-size:11.5px; padding:8px; background:#1E2E48; border-color:#2C3C57; color:#F1EEE5;" onclick="generateTTRReport()">TTR report</button>
-      <button class="btn" style="flex:1; font-size:11.5px; padding:8px; background:#1E2E48; border-color:#2C3C57; color:#F1EEE5;" onclick="generateAppointmentList()">Appt list</button>
-      <button class="btn" style="flex:1; font-size:11.5px; padding:8px; background:#1E6B4E; border-color:#1E6B4E; color:#fff;" onclick="exportAppointmentExcel()">📊 Excel</button>
-    </div>
-    <div class="sidebar-reports-row" style="display:flex; gap:6px; margin-bottom:16px;">
-      <button class="btn" style="flex:1; font-size:11.5px; padding:8px; background:#8C2F26; border-color:#8C2F26; color:#fff;" onclick="exportMissedAppointmentExcel()">📊 Missed Appt Excel</button>
-    </div>
-    <input type="file" id="jsonFile" accept=".json" style="display:none" onchange="handleJsonImport(event)">
-    <div class="patient-list" id="patientList"></div>
-    <div class="logout-row">
-      <span id="sessionEmail"></span>
       <span class="logout-link" onclick="logout()">Sign out</span>
     </div>
   </div>
@@ -588,6 +565,7 @@ let currentTab = "profile";
 let currentView = "patients";
 let currentSession = null;
 let currentReviewerName = "";
+let currentUserRole = "reviewer"; // "admin" | "reviewer"
 
 function initSupabase(){
   const cfg = window.APP_CONFIG || {};
@@ -659,10 +637,43 @@ function promptChangeName(){
 
 async function loadApp(){
   await checkDbConnection();
+  await fetchUserRole();
+  applyRoleUI();
   patients = await fetchPatients();
   await renderPatientList();
   await renderMain();
   setupRealtime();
+}
+
+async function fetchUserRole(){
+  if(!currentSession) return;
+  try{
+    const {data} = await sb.from("user_roles").select("role").eq("user_id", currentSession.user.id).single();
+    if(data) currentUserRole = data.role||"reviewer";
+    else {
+      // If no role record, check if first user → auto admin
+      const {count} = await sb.from("user_roles").select("*",{count:"exact",head:true});
+      if(count===0){
+        // First user becomes admin
+        await sb.from("user_roles").insert({user_id:currentSession.user.id, email:currentSession.user.email, role:"admin"});
+        currentUserRole = "admin";
+      } else {
+        // Insert as reviewer
+        await sb.from("user_roles").insert({user_id:currentSession.user.id, email:currentSession.user.email, role:"reviewer"});
+        currentUserRole = "reviewer";
+      }
+    }
+  }catch(e){ currentUserRole = "reviewer"; }
+}
+
+function applyRoleUI(){
+  const isAdmin = currentUserRole === "admin";
+  // Show/hide admin-only elements
+  document.querySelectorAll(".admin-only").forEach(el=>{ el.style.display = isAdmin?"":"none"; });
+  document.querySelectorAll(".reviewer-hidden").forEach(el=>{ el.style.display = isAdmin?"none":""; });
+  // Admin nav button
+  const adminNav = document.getElementById("navAdmin");
+  if(adminNav) adminNav.style.display = isAdmin?"":"none";
 }
 
 // ── Real-time sync ──
@@ -1080,20 +1091,19 @@ function switchView(view){
   if(view !== currentView) pushNav(view, null, null);
   currentView = view;
   currentPatientId = null;
-  ["navPatients","navTTR","navDefaulters","navAnalysis","navSettings"].forEach(id=>{
-    const el=document.getElementById(id); if(el) el.classList.toggle("active", id==="nav"+view.charAt(0).toUpperCase()+view.slice(1));
+  ["navPatients","navTTR","navDefaulters","navAnalysis","navSchedule","navSettings","navAdmin"].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.classList.remove("active");
   });
-  document.getElementById("navPatients")?.classList.toggle("active", view==="patients");
-  document.getElementById("navTTR")?.classList.toggle("active", view==="ttr");
-  document.getElementById("navDefaulters")?.classList.toggle("active", view==="defaulters");
-  document.getElementById("navAnalysis")?.classList.toggle("active", view==="analysis");
-  document.getElementById("navSettings")?.classList.toggle("active", view==="settings");
+  const navMap={patients:"navPatients",ttr:"navTTR",defaulters:"navDefaulters",analysis:"navAnalysis",schedule:"navSchedule",settings:"navSettings",admin:"navAdmin"};
+  const navId=navMap[view]; if(navId){const el=document.getElementById(navId);if(el)el.classList.add("active");}
   syncMobileTabs(view);
   updateBreadcrumb(view, null, null);
   if(view==="patients") showAllPatients("");
   else if(view==="ttr") renderTTROverview();
   else if(view==="defaulters") renderDefaultersView();
   else if(view==="analysis") renderAnalysisView();
+  else if(view==="schedule") renderScheduleView();
+  else if(view==="admin") renderAdminView();
   else renderSettingsView();
 }
 
@@ -1208,13 +1218,15 @@ function invalidateTTRCache(patientId){
 
 // ---------- New patient ----------
 function openNewPatientFromSearch(prefillName){
+  if(currentUserRole!=="admin"){ showToast("Only admins can add new patients.","error"); return; }
   document.getElementById("np_name").value = prefillName || "";
   document.getElementById("np_mrn").value = "";
   document.getElementById("newPatientModal").classList.add("show");
 }
 
 function openNewPatientModal(){
-  if(!configOk){ alert("Connect Supabase first (see the setup notice on the right) before adding patients."); return; }
+  if(currentUserRole!=="admin"){ showToast("Only admins can add new patients.","error"); return; }
+  if(!configOk){ alert("Connect Supabase first before adding patients."); return; }
   document.getElementById("np_name").value = "";
   document.getElementById("np_mrn").value = "";
   document.getElementById("newPatientModal").classList.add("show");
@@ -1235,6 +1247,7 @@ async function createPatient(){
 }
 
 async function exportData(){
+  if(currentUserRole!=="admin"){ showToast("Only admins can export data.","error"); return; }
   if(!configOk){ alert("Connect Supabase first."); return; }
   const allPatients = await fetchPatients();
   const visitsByPatient = {};
@@ -1826,7 +1839,7 @@ async function renderMain(){
     statusStrip+passoverHtml+flagsHtml+alertHtml+
     '<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:4px;">'+
       '<div class="tabs" style="margin-bottom:0; border-bottom:none;">'+tabBtn('profile','Patient info')+tabBtn('review','New review')+tabBtn('history','History & TTR')+tabBtn('audit','Audit log')+'</div>'+
-      '<button class="btn" style="font-size:12px; padding:6px 14px;" onclick="generatePatientReport()">⬇ Patient report</button>'+
+      '<button class="btn admin-only" style="font-size:12px; padding:6px 14px;" onclick="generatePatientReport()">⬇ Patient report</button>'+
     '</div>'+
     '<div style="border-bottom:1px solid var(--line); margin-bottom:22px;"></div>'+
     '<div id="panelProfile" class="panel"></div>'+
@@ -1881,7 +1894,7 @@ function renderProfilePanel(p){
       '</div>'+
       '<p class="hint">Inactive patients still appear in the patient list but are dimmed. Excluded patients are removed from the average TTR calculation shown in the TTR view.</p>'+
     '</div>'+
-    '<div class="row-actions"><button class="btn btn-danger" onclick="deletePatient()">Delete patient</button><button class="btn btn-primary" onclick="saveProfile()">Save changes</button></div>';
+    '<div class="row-actions"><button class="btn btn-danger admin-only" onclick="deletePatient()">Delete patient</button><button class="btn btn-primary" onclick="saveProfile()">Save changes</button></div>';
 }
 function field(label,id,value,type,step){
   type = type||'text';
@@ -1928,6 +1941,7 @@ async function saveProfile(){
   showTab("profile");
 }
 async function deletePatient(){
+  if(currentUserRole!=="admin"){ showToast("Only admins can delete patients.","error"); return; }
   if(!confirm("Delete this patient and all their review history? This cannot be undone.")) return;
   await deletePatientRow(currentPatientId);
   patients = patients.filter(x => x.id !== currentPatientId);
@@ -2219,31 +2233,38 @@ async function saveReview(){
   };
 
   if(editingVisitId){
-    // ── Optimistic lock: check if another user edited since we loaded ──
     const cachedVisit = (visitsCache[currentPatientId]||[]).find(v=>v.id===editingVisitId);
     const conflict = await checkVisitConflict(editingVisitId, cachedVisit?.updatedAt);
     if(conflict){
-      const proceed = confirm(
-        "⚠ Conflict detected: another reviewer has edited this review since you opened it.\n\n"+
-        "Click OK to overwrite their changes with yours, or Cancel to discard your changes and reload."
-      );
-      if(!proceed){
-        editingVisitId = null;
-        delete visitsCache[currentPatientId]; // force fresh fetch
-        await renderMain(); showTab("history"); return;
-      }
+      const proceed = confirm("⚠ Conflict detected: another reviewer has edited this review since you opened it.\n\nClick OK to overwrite their changes with yours, or Cancel to discard your changes and reload.");
+      if(!proceed){ editingVisitId=null; delete visitsCache[currentPatientId]; await renderMain(); showTab("history"); return; }
     }
     await upsertVisitRow(currentPatientId, visit);
-    if(!visitsCache[currentPatientId]) visitsCache[currentPatientId] = [];
-    const idx = visitsCache[currentPatientId].findIndex(v=>v.id===editingVisitId);
-    if(idx>=0) visitsCache[currentPatientId][idx] = visit;
-    else visitsCache[currentPatientId].push(visit);
-    editingVisitId = null;
+    if(!visitsCache[currentPatientId]) visitsCache[currentPatientId]=[];
+    const idx=visitsCache[currentPatientId].findIndex(v=>v.id===editingVisitId);
+    if(idx>=0) visitsCache[currentPatientId][idx]=visit; else visitsCache[currentPatientId].push(visit);
+    editingVisitId=null;
     invalidateTTRCache(currentPatientId);
     showToast("Review updated ✓","success",2000);
   } else {
+    // ── Auto-cancel old TCA if new date is different ──
+    if(nextAppt){
+      const existingVisits = await loadVisits(currentPatientId);
+      const today = new Date().toISOString().slice(0,10);
+      const oldTcaVisit = [...existingVisits]
+        .sort((a,b)=>new Date(b.date)-new Date(a.date))
+        .find(v=>v.nextAppt && v.nextAppt >= today && v.nextAppt !== nextAppt);
+      if(oldTcaVisit){
+        // Clear the old TCA date from that visit
+        oldTcaVisit.nextAppt = "";
+        await upsertVisitRow(currentPatientId, oldTcaVisit);
+        const oidx = visitsCache[currentPatientId]?.findIndex(v=>v.id===oldTcaVisit.id);
+        if(oidx>=0) visitsCache[currentPatientId][oidx]=oldTcaVisit;
+        showToast("Old TCA ("+oldTcaVisit.nextAppt||"previous"+") cancelled — new TCA: "+nextAppt,"info",4000);
+      }
+    }
     await insertVisitRow(currentPatientId, visit);
-    if(!visitsCache[currentPatientId]) visitsCache[currentPatientId] = [];
+    if(!visitsCache[currentPatientId]) visitsCache[currentPatientId]=[];
     visitsCache[currentPatientId].push(visit);
     invalidateTTRCache(currentPatientId);
   }
@@ -2928,6 +2949,7 @@ function printWindow(html, title){
 }
 
 async function generatePatientReport(patientId){
+  if(currentUserRole!=="admin"){ showToast("Only admins can generate reports.","error"); return; }
   const p = patients.find(x=>x.id===(patientId||currentPatientId));
   if(!p){ alert("Select a patient first."); return; }
   const visits = await loadVisits(p.id);
@@ -3052,6 +3074,7 @@ async function generatePatientReport(patientId){
 }
 
 async function generateTTRReport(){
+  if(currentUserRole!=="admin"){ showToast("Only admins can generate reports.","error"); return; }
   const ttrData=[];
   for(const p of [...patients].sort((a,b)=>a.name.localeCompare(b.name))){
     if(p.isActive===false) continue;
@@ -3610,6 +3633,192 @@ async function renderAuditPanel(patientId){
     '<div class="table-scroll"><table class="history"><thead><tr>'+
       '<th>Date / time</th><th>Action</th><th>Record</th><th>By</th><th>Fields changed</th>'+
     '</tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+}
+
+// ── Schedule view (12-week Thursday grid) ──────────────────────────────────
+let sessionConfigCache = null;
+
+async function fetchSessionConfigs(){
+  if(sessionConfigCache) return sessionConfigCache;
+  try{
+    const {data} = await sb.from("clinic_sessions").select("*");
+    const map = {};
+    (data||[]).forEach(r=>{ map[r.session_date]={maxPatients:r.max_patients||30, notes:r.notes||"", noInrDay:r.no_inr_day||false}; });
+    sessionConfigCache = map;
+    return map;
+  }catch(e){ return {}; }
+}
+
+function getNext12Thursdays(){
+  const dates = [];
+  const d = new Date(); d.setHours(0,0,0,0);
+  // Move to next Thursday
+  const day = d.getDay(); // 0=Sun,1=Mon,...,4=Thu
+  const daysUntilThursday = (4 - day + 7) % 7 || 7;
+  d.setDate(d.getDate() + daysUntilThursday);
+  for(let i=0;i<12;i++){
+    dates.push(new Date(d));
+    d.setDate(d.getDate()+7);
+  }
+  return dates;
+}
+
+async function renderScheduleView(){
+  const main = document.getElementById("main");
+  if(!configOk){ main.innerHTML = configWarningHtml(); return; }
+  main.innerHTML = '<div class="sched-header"><h1 style="font-family:var(--serif);font-size:22px;margin:0;">Clinic Schedule</h1><div style="font-size:12px;color:var(--ink-soft);">Loading…</div></div>';
+
+  // Load all visits to count per date
+  for(const p of patients){ if(!visitsCache[p.id]) await loadVisits(p.id); }
+  const sessionConfigs = await fetchSessionConfigs();
+
+  // Count patients per appointment date
+  const countByDate = {};
+  for(const p of patients){
+    if(p.isActive===false) continue;
+    const visits = visitsCache[p.id]||[];
+    const sorted = [...visits].filter(v=>v.nextAppt).sort((a,b)=>new Date(b.date)-new Date(a.date));
+    if(sorted.length && sorted[0].nextAppt) countByDate[sorted[0].nextAppt] = (countByDate[sorted[0].nextAppt]||0)+1;
+  }
+  // Also count rescheduled defaulters
+  try{
+    const {data} = await sb.from("defaulter_actions").select("new_tca").eq("action","Contacted — reschedule").not("new_tca","is",null);
+    (data||[]).forEach(r=>{ if(r.new_tca) countByDate[r.new_tca]=(countByDate[r.new_tca]||0)+1; });
+  }catch(e){}
+
+  const thursdays = getNext12Thursdays();
+  const isAdmin = currentUserRole==="admin";
+
+  const boxes = thursdays.map(d=>{
+    const dateStr = d.toISOString().slice(0,10);
+    const dd = String(d.getDate()).padStart(2,'0');
+    const mm = String(d.getMonth()+1).padStart(2,'0');
+    const yyyy = d.getFullYear();
+    const displayDate = `${dd}/${mm}/${yyyy}`;
+    const cfg = sessionConfigs[dateStr]||{maxPatients:30, notes:"", noInrDay:false};
+    const count = countByDate[dateStr]||0;
+    const max = cfg.maxPatients||30;
+    const pct = count/max;
+    const boxClass = pct>=1?"full":pct>=0.9?"warn":"ok";
+    const noteHtml = cfg.notes
+      ? `<div class="sched-note ${cfg.notes.toLowerCase().includes('nephro')?'nephro':'noinr'}">${escapeHtml(cfg.notes)}</div>`
+      : `<div class="sched-note"></div>`;
+    const editBtn = isAdmin ? `<div style="margin-top:8px;"><button class="btn" style="font-size:11px;padding:4px 10px;" onclick="event.stopPropagation();editSession('${dateStr}',${max},'${escapeHtml(cfg.notes||'')}',${cfg.noInrDay})">Edit</button></div>` : '';
+    return `<div class="sched-box ${boxClass}" onclick="filterApptByDate('${dateStr}')">
+      <div class="sched-date">${displayDate}</div>
+      ${noteHtml}
+      <div class="sched-count">${count} / (Max ${max} patients)</div>
+      ${editBtn}
+    </div>`;
+  }).join('');
+
+  main.innerHTML =
+    '<div class="sched-header">'+
+      '<h1 style="font-family:var(--serif);font-size:22px;margin:0;">Clinic Schedule <span style="font-size:13px;font-weight:400;color:var(--ink-soft);">— Next 12 Thursdays</span></h1>'+
+      '<div class="sched-legend">'+
+        '<span><span class="leg-dot" style="background:#C0392B;"></span> Full</span>'+
+        '<span><span class="leg-dot" style="background:#F1C40F;"></span> ≥90% (warning)</span>'+
+        '<span><span class="leg-dot" style="background:var(--card);border:1px solid var(--line);"></span> Available</span>'+
+      '</div>'+
+    '</div>'+
+    '<div class="schedule-grid">'+boxes+'</div>'+
+    '<div style="padding:0 32px 8px;font-size:12px;color:var(--ink-soft);">Click any date to view that day\'s appointment list.</div>';
+}
+
+async function filterApptByDate(dateStr){
+  // Navigate to dashboard appointment card for this date
+  currentPatientId = null;
+  pushNav("schedule_appt", null, null);
+  updateBreadcrumb("Appointments for "+dateStr, null, null);
+  const main = document.getElementById("main");
+  main.innerHTML = '<div style="padding:24px 32px;"><h2 style="font-family:var(--serif);font-size:20px;margin:0 0 16px;">Appointments — '+dateStr+'</h2><div class="dash-empty">Loading…</div></div>';
+  const card = await buildApptCard(dateStr);
+  main.innerHTML = '<div style="padding:24px 32px; max-width:680px;">' +
+    '<div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;">'+
+    '<button class="btn" onclick="switchView(\'schedule\')" style="font-size:12px;padding:6px 14px;">← Back to Schedule</button>'+
+    '<h2 style="font-family:var(--serif);font-size:20px;margin:0;">Appointments — '+escapeHtml(dateStr)+'</h2></div>'+card+'</div>';
+}
+
+async function editSession(dateStr, maxPts, notes, noInrDay){
+  const newMax = parseInt(prompt("Max patients for "+dateStr+":", maxPts)||maxPts);
+  if(isNaN(newMax)||newMax<1) return;
+  const newNotes = prompt("Special notes (e.g. 'Nephro Clinic', 'NO INR 1 day before'):", notes)||"";
+  try{
+    await sb.from("clinic_sessions").upsert({session_date:dateStr, max_patients:newMax, notes:newNotes, no_inr_day:noInrDay});
+    sessionConfigCache = null;
+    showToast("Session updated ✓","success",2000);
+    renderScheduleView();
+  }catch(e){ showToast("Failed: "+e.message,"error"); }
+}
+
+// ── Admin panel ─────────────────────────────────────────────────────────────
+async function renderAdminView(){
+  if(currentUserRole!=="admin"){ showToast("Admin access only.","error"); return; }
+  const main = document.getElementById("main");
+  main.innerHTML = '<div style="padding:24px 32px;"><h1 style="font-family:var(--serif);font-size:24px;margin:0 0 20px;">Admin panel</h1><div class="dash-empty">Loading users…</div></div>';
+
+  let users = [];
+  try{
+    const {data} = await sb.from("user_roles").select("*").order("created_at",{ascending:true});
+    users = data||[];
+  }catch(e){}
+
+  const userRows = users.map(u=>`
+    <div class="user-row">
+      <div>
+        <div class="user-email">${escapeHtml(u.email||u.user_id)}</div>
+        <div style="font-size:11.5px;color:var(--ink-soft);">ID: ${escapeHtml(u.user_id)}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span class="user-role-badge ${u.role==='admin'?'role-admin':'role-reviewer'}">${u.role==='admin'?'Admin':'Reviewer'}</span>
+        <button class="btn" style="font-size:11.5px;padding:5px 12px;" onclick="toggleUserRole('${escapeHtml(u.user_id)}','${u.role}')">
+          ${u.role==='admin'?'Set Reviewer':'Set Admin'}
+        </button>
+      </div>
+    </div>`).join('');
+
+  main.innerHTML =
+    '<div style="padding:24px 32px; max-width:760px;">'+
+    '<h1 style="font-family:var(--serif);font-size:24px;margin:0 0 20px;">Admin panel</h1>'+
+
+    '<div class="admin-section">'+
+      '<h3>User management</h3>'+
+      '<p style="font-size:13px;color:var(--ink-soft);margin:0 0 12px;">New users are added via Supabase → Authentication → Users → Add user. Roles can be changed below.</p>'+
+      (userRows||'<div class="dash-empty">No users found.</div>')+
+    '</div>'+
+
+    '<div class="admin-section">'+
+      '<h3>Clinic session settings</h3>'+
+      '<p style="font-size:13px;color:var(--ink-soft);margin:0 0 12px;">Configure max patients and special notes per session from the Schedule view (click Edit on any date box).</p>'+
+      '<button class="btn btn-primary" onclick="switchView(\'schedule\')" style="font-size:13px;">Go to Schedule →</button>'+
+    '</div>'+
+
+    '<div class="admin-section">'+
+      '<h3>Data management</h3>'+
+      '<div style="display:flex;gap:10px;flex-wrap:wrap;">'+
+        '<button class="btn btn-primary" onclick="exportData()" style="font-size:13px;">Export all data (JSON)</button>'+
+        '<button class="btn" onclick="document.getElementById(\'jsonFile\').click()" style="font-size:13px;">Import data (JSON)</button>'+
+        '<button class="btn" onclick="generateTTRReport()" style="font-size:13px;">TTR report (PDF)</button>'+
+        '<button class="btn" onclick="exportAppointmentExcel()" style="font-size:13px;">📊 Appointment Excel</button>'+
+        '<button class="btn" style="background:#8C2F26;border-color:#8C2F26;color:#fff;font-size:13px;" onclick="exportMissedAppointmentExcel()">📊 Missed Appt Excel</button>'+
+      '</div>'+
+    '</div>'+
+
+    '<div class="admin-section">'+
+      '<h3>My role</h3>'+
+      '<p style="font-size:13px;color:var(--ink-soft);">You are signed in as <b>'+escapeHtml(currentReviewerName||currentSession?.user?.email||'')+'</b> with role <span class="user-role-badge role-admin">Admin</span></p>'+
+    '</div>'+
+    '</div>';
+}
+
+async function toggleUserRole(userId, currentRole){
+  const newRole = currentRole==='admin'?'reviewer':'admin';
+  if(!confirm("Change this user to "+newRole+"?")) return;
+  try{
+    await sb.from("user_roles").update({role:newRole}).eq("user_id",userId);
+    showToast("Role updated ✓","success",2000);
+    renderAdminView();
+  }catch(e){ showToast("Failed: "+e.message,"error"); }
 }
 
 async function renderSettingsView(){
