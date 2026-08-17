@@ -753,6 +753,20 @@ function escapeHtml(s){
   return d.innerHTML;
 }
 
+// Format a Date object as a LOCAL calendar-date string "YYYY-MM-DD".
+// NEVER use d.toISOString().slice(0,10) for calendar dates — toISOString()
+// converts to UTC first, which silently shifts the date backward by one day
+// for any positive UTC offset (e.g. Malaysia, UTC+8) whenever the Date is at
+// local midnight. That mismatch is what caused clinic schedule counts and
+// appointment lookups to miss appointments saved via <input type="date">,
+// which stores the exact local calendar date with no timezone conversion.
+function localDateStr(d){
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth()+1).padStart(2,'0');
+  const dd = String(d.getDate()).padStart(2,'0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 // ── Navigation history (desktop) ──
 let navHistory = []; // stack of {view, patientId, tab}
 
@@ -1268,7 +1282,7 @@ async function exportData(){
   const blob = new Blob([JSON.stringify(payload, null, 2)], {type:"application/json"});
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url; a.download = "inr-clinic-backup-"+new Date().toISOString().slice(0,10)+".json"; a.click();
+  a.href = url; a.download = "inr-clinic-backup-"+localDateStr(new Date())+".json"; a.click();
   URL.revokeObjectURL(url);
 }
 
@@ -1490,7 +1504,7 @@ async function renderDashboard(){
   const main = document.getElementById("main");
   if(!configOk){ main.innerHTML = configWarningHtml(); return; }
 
-  const today = new Date().toISOString().slice(0,10);
+  const today = localDateStr(new Date());
   const name = currentReviewerName || currentSession?.user?.email?.split('@')[0] || "Reviewer";
   const dateStr = new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
 
@@ -1744,7 +1758,7 @@ async function buildScheduleSummaryCard(){
   const thursdays = getNext12Thursdays().slice(0,4);
 
   const rows = thursdays.map(d=>{
-    const dateStr = d.toISOString().slice(0,10);
+    const dateStr = localDateStr(d);
     const dd = String(d.getDate()).padStart(2,'0');
     const mm = String(d.getMonth()+1).padStart(2,'0');
     const yyyy = d.getFullYear();
@@ -2319,7 +2333,7 @@ async function saveReview(){
     // ── Auto-cancel old TCA if new date is different ──
     if(nextAppt){
       const existingVisits = await loadVisits(currentPatientId);
-      const today = new Date().toISOString().slice(0,10);
+      const today = localDateStr(new Date());
       const oldTcaVisit = [...existingVisits]
         .sort((a,b)=>new Date(b.date)-new Date(a.date))
         .find(v=>v.nextAppt && v.nextAppt >= today && v.nextAppt !== nextAppt);
@@ -3567,7 +3581,7 @@ async function exportMissedAppointmentExcel(){
 
   XLSX.utils.book_append_sheet(wb, ws, 'Missed Appointments');
 
-  const filename = 'Missed_Appointment_Sheet_'+new Date().toISOString().slice(0,10)+'.xlsx';
+  const filename = 'Missed_Appointment_Sheet_'+localDateStr(new Date())+'.xlsx';
   XLSX.writeFile(wb, filename);
   showToast("Downloaded: "+filename,"success",3000);
 }
@@ -3655,7 +3669,7 @@ async function exportAppointmentExcel(){
     XLSX.utils.book_append_sheet(wb, ws, sheetName.substring(0,31));
   }
 
-  const filename = 'Appointment_List_'+new Date().toISOString().slice(0,10)+'.xlsx';
+  const filename = 'Appointment_List_'+localDateStr(new Date())+'.xlsx';
   XLSX.writeFile(wb, filename);
   showToast("Excel file downloaded: "+filename,"success",3000);
 }
@@ -3773,7 +3787,7 @@ async function renderScheduleView(){
   const isAdmin = currentUserRole==="admin";
 
   const boxes = thursdays.map(d=>{
-    const dateStr = d.toISOString().slice(0,10);
+    const dateStr = localDateStr(d);
     const dd = String(d.getDate()).padStart(2,'0');
     const mm = String(d.getMonth()+1).padStart(2,'0');
     const yyyy = d.getFullYear();
