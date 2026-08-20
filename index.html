@@ -1902,11 +1902,11 @@ async function renderMain(){
 
   // Medication interaction banner — only shown if there's at least one
   // medication flagged as affecting INR, so reviewers see it at a glance.
-  const interactingMeds = (p.medications||[]).filter(m=>m.effect==='increase'||m.effect==='decrease');
+  const interactingMeds = (p.medications||[]).filter(m=>m.effect==='increase'||m.effect==='decrease'||m.effect==='probable_increase'||m.effect==='probable_decrease');
   const medicationsHtml = interactingMeds.length===0 ? '' :
     '<div class="flag" style="margin-bottom:14px; background:#FFF8EC; border-color:#E8C874; color:#5A4200;">'+
       '<b>💊 Medications affecting INR:</b> '+
-      interactingMeds.map(m=>escapeHtml(m.name)+' ('+(m.effect==='increase'?'↑ increases':'↓ decreases')+')').join(', ')+
+      interactingMeds.map(m=>escapeHtml(m.name)+' ('+(m.effect==='increase'?'↑ increases':m.effect==='probable_increase'?'↑ probably increases':m.effect==='decrease'?'↓ decreases':'↓ probably decreases')+')').join(', ')+
     '</div>';
 
   main.innerHTML =
@@ -1978,7 +1978,9 @@ function renderProfilePanel(p){
         '<div class="field"><label>Medication name</label><input id="med_name_input" placeholder="e.g. Amiodarone" onkeydown="if(event.key===\'Enter\'){event.preventDefault(); addMedication();}"></div>'+
         '<div class="field"><label>Effect on INR</label><select id="med_effect_input">'+
           '<option value="increase">Increases INR</option>'+
+          '<option value="probable_increase">Probably increases INR</option>'+
           '<option value="decrease">Decreases INR</option>'+
+          '<option value="probable_decrease">Probably decreases INR</option>'+
           '<option value="none">No effect</option>'+
         '</select></div>'+
         '<div class="field" style="justify-content:flex-end;"><button class="btn" onclick="addMedication()">+ Add medication</button></div>'+
@@ -1997,7 +1999,9 @@ function renderProfilePanel(p){
 }
 function medEffectBadge(effect){
   if(effect==="increase") return '<span class="tag" style="background:#FDEBEA; color:#B33A2E;">↑ Increases INR</span>';
+  if(effect==="probable_increase") return '<span class="tag" style="background:#FDEBEA; color:#B33A2E;">↑ Probably increases INR</span>';
   if(effect==="decrease") return '<span class="tag" style="background:#EDF3FB; color:#2C5A8C;">↓ Decreases INR</span>';
+  if(effect==="probable_decrease") return '<span class="tag" style="background:#EDF3FB; color:#2C5A8C;">↓ Probably decreases INR</span>';
   return '<span class="tag" style="background:#EEF0EA; color:#5B6B4E;">No effect</span>';
 }
 function renderMedicationsList(){
@@ -3272,7 +3276,7 @@ async function generatePatientReport(patientId){
     <div class="meta" style="margin-top:4px;">Phone: ${escapeHtml(p.phone||'—')} &nbsp;|&nbsp; Initiation: ${escapeHtml(p.initiationDate||'—')} &nbsp;|&nbsp; Status: ${escapeHtml(status.label)}</div>
     ${p.notes?'<div class="flag" style="margin-top:8px;"><b>Clinical notes:</b><br>'+escapeHtml(p.notes).replace(/\n/g,'<br>')+'</div>':''}
     ${p.passoverNotes?'<div class="flag" style="margin-top:8px; background:#FFFBEA; border-color:#E8C060; color:#5A3D00;"><b>📋 Passover notes:</b><br>'+escapeHtml(p.passoverNotes).replace(/\n/g,'<br>')+'</div>':''}
-    ${(p.medications&&p.medications.length)?'<div class="flag" style="margin-top:8px;"><b>💊 Current medications:</b><br>'+p.medications.map(m=>escapeHtml(m.name)+' — '+(m.effect==='increase'?'Increases INR':m.effect==='decrease'?'Decreases INR':'No effect')).join('<br>')+'</div>':''}
+    ${(p.medications&&p.medications.length)?'<div class="flag" style="margin-top:8px;"><b>💊 Current medications:</b><br>'+p.medications.map(m=>escapeHtml(m.name)+' — '+(m.effect==='increase'?'Increases INR':m.effect==='probable_increase'?'Probably increases INR':m.effect==='decrease'?'Decreases INR':m.effect==='probable_decrease'?'Probably decreases INR':'No effect')).join('<br>')+'</div>':''}
     <h2>TTR Summary</h2>
     <table><tr>
       <th>Overall TTR (${p.targetLow}–${p.targetHigh})</th>
