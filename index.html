@@ -890,10 +890,10 @@ function patientToRow(p){
   return {id:p.id, name:p.name, mrn:p.mrn, phone:p.phone, indication:p.indication, target_low:p.targetLow, target_high:p.targetHigh, duration:p.duration, notes:p.notes||"", passover_notes:p.passoverNotes||"", initiation_date:p.initiationDate||null, is_active:p.isActive!==false, ttr_excluded:p.ttrExcluded||false, ttr_exclude_reason:p.ttrExcludeReason||"", medications:p.medications||[]};
 }
 function rowToVisit(r){
-  return {id:r.id, date:r.date, twd:r.twd, inr:r.inr, factors:r.factors||[], factorNotes:r.factor_notes||{}, admitDate:r.admit_date||"", admitDx:r.admit_dx||"", planAction:r.plan_action, planDays:r.plan_days, planLoadMg:r.plan_load_mg, planSubAction:r.plan_sub_action||"", planSubPct:r.plan_sub_pct, newTwd:r.new_twd, nextAppt:r.next_appt||"", clinicalNote:r.clinical_note||"", planNotes:r.plan_notes||"", regimeLabel:r.regime_label||"", inrDayBefore:r.inr_day_before||false, longerTca:r.longer_tca||false, caseDiscussedDr:r.case_discussed_dr||false, doctorName:r.doctor_name||"", reviewer:r.reviewer||"", updatedAt:r.updated_at||null};
+  return {id:r.id, date:r.date, twd:r.twd, inr:r.inr, factors:r.factors||[], factorNotes:r.factor_notes||{}, admitDate:r.admit_date||"", admitDx:r.admit_dx||"", admitInterrupted:r.admit_interrupted||false, planAction:r.plan_action, planDays:r.plan_days, planLoadMg:r.plan_load_mg, planSubAction:r.plan_sub_action||"", planSubPct:r.plan_sub_pct, newTwd:r.new_twd, nextAppt:r.next_appt||"", clinicalNote:r.clinical_note||"", planNotes:r.plan_notes||"", regimeLabel:r.regime_label||"", inrDayBefore:r.inr_day_before||false, longerTca:r.longer_tca||false, caseDiscussedDr:r.case_discussed_dr||false, doctorName:r.doctor_name||"", reviewer:r.reviewer||"", updatedAt:r.updated_at||null};
 }
 function visitToRow(v, patientId){
-  return {id:v.id, patient_id:patientId, date:v.date||null, twd:v.twd||null, inr:v.inr||null, factors:v.factors||[], factor_notes:v.factorNotes||{}, admit_date:v.admitDate||null, admit_dx:v.admitDx||null, plan_action:v.planAction||null, plan_days:v.planDays||null, plan_load_mg:v.planLoadMg||null, plan_sub_action:v.planSubAction||null, plan_sub_pct:v.planSubPct||null, new_twd:v.newTwd||null, next_appt:v.nextAppt||null, clinical_note:v.clinicalNote||null, plan_notes:v.planNotes||null, regime_label:v.regimeLabel||null, inr_day_before:v.inrDayBefore||false, longer_tca:v.longerTca||false, case_discussed_dr:v.caseDiscussedDr||false, doctor_name:v.doctorName||null, reviewer:v.reviewer||null};
+  return {id:v.id, patient_id:patientId, date:v.date||null, twd:v.twd||null, inr:v.inr||null, factors:v.factors||[], factor_notes:v.factorNotes||{}, admit_date:v.admitDate||null, admit_dx:v.admitDx||null, admit_interrupted:v.admitInterrupted||false, plan_action:v.planAction||null, plan_days:v.planDays||null, plan_load_mg:v.planLoadMg||null, plan_sub_action:v.planSubAction||null, plan_sub_pct:v.planSubPct||null, new_twd:v.newTwd||null, next_appt:v.nextAppt||null, clinical_note:v.clinicalNote||null, plan_notes:v.planNotes||null, regime_label:v.regimeLabel||null, inr_day_before:v.inrDayBefore||false, longer_tca:v.longerTca||false, case_discussed_dr:v.caseDiscussedDr||false, doctor_name:v.doctorName||null, reviewer:v.reviewer||null};
   // Note: updated_at is managed by Postgres (default now()), not sent by client
 }
 
@@ -1800,6 +1800,63 @@ async function buildScheduleSummaryCard(){
   </div>`;
 }
 
+// ── TTR exclusion criteria (per clinic policy) ──
+// A patient is flagged as a candidate for TTR exclusion if ANY of the
+// following hold. This does NOT auto-exclude — it surfaces an alert so a
+// reviewer can confirm and toggle "Excluded" (with a reason) manually.
+function getTTRExclusionCriteria(p, visits){
+  const reasons = [];
+  const today = new Date(); today.setHours(0,0,0,0);
+  const currentYear = today.getFullYear();
+  const oneYearAgo = new Date(today); oneYearAgo.setFullYear(oneYearAgo.getFullYear()-1);
+  const sorted = [...visits].filter(v=>v.date).sort((a,b)=>new Date(a.date)-new Date(b.date));
+
+  // 1. INR readings < 3 times per year (readings in the past 12 months)
+  const readingsPastYear = sorted.filter(v=>new Date(v.date) >= oneYearAgo).length;
+  if(readingsPastYear < 3) reasons.push('Fewer than 3 INR readings in the past 12 months ('+readingsPastYear+' recorded)');
+
+  // 2. Defaulted > 6 months (missed TCA more than 180 days ago, still outstanding)
+  if(sorted.length>0){
+    const last = sorted[sorted.length-1];
+    if(last.nextAppt){
+      const appt = new Date(last.nextAppt); appt.setHours(0,0,0,0);
+      const daysMissed = Math.floor((today-appt)/86400000);
+      if(daysMissed>180) reasons.push('Defaulted for more than 6 months (TCA was '+last.nextAppt+', '+daysMissed+' days ago)');
+    }
+  }
+
+  // 3. > 2 hospital admissions in the current year, each with warfarin interruption
+  const currentYearInterruptedAdmissions = visits.filter(v=>
+    v.admitDate && new Date(v.admitDate).getFullYear()===currentYear && v.admitInterrupted
+  );
+  if(currentYearInterruptedAdmissions.length > 2) reasons.push('More than 2 hospital admissions in '+currentYear+' with warfarin interruption ('+currentYearInterruptedAdmissions.length+' recorded)');
+
+  // 4. Not on lifelong warfarin
+  const dur = (p.duration||'').toLowerCase();
+  if(dur && !dur.includes('lifelong') && !dur.includes('life long') && !dur.includes('long term') && !dur.includes('longterm')){
+    reasons.push('Not on lifelong warfarin (duration: '+p.duration+')');
+  }
+
+  // 5. Less than 6 months since warfarin initiation
+  const initDateStr = p.initiationDate || (sorted.length>0?sorted[0].date:null);
+  if(initDateStr){
+    const initDate = new Date(initDateStr); initDate.setHours(0,0,0,0);
+    const daysSinceStart = Math.floor((today-initDate)/86400000);
+    if(daysSinceStart>=0 && daysSinceStart<180) reasons.push('Less than 6 months since warfarin initiation ('+(p.initiationDate?'initiated':'first review')+' '+initDateStr+', '+daysSinceStart+' days ago)');
+  }
+
+  return reasons;
+}
+async function quickExcludeFromTTR(patientId, reasonsJoined){
+  const p = patients.find(x => x.id === patientId);
+  if(!p) return;
+  p.ttrExcluded = true;
+  p.ttrExcludeReason = reasonsJoined;
+  await upsertPatientRow(p, true);
+  showToast("Patient excluded from TTR average","success",3000);
+  await renderMain();
+}
+
 // ── Main render ──
 function getSpecialFlags(p, visits){
   const flags = [];
@@ -1874,6 +1931,20 @@ async function renderMain(){
     flagsHtml = '<div class="alert-banner" style="background:#FEF9EC; border-color:#E8D98A; color:#6B5300;"><span>⚑</span><div><b>Special notes:</b><ul class="flag-list">'+flags.map(f=>'<li>'+escapeHtml(f)+'</li>').join('')+'</ul></div></div>';
   }
 
+  // TTR exclusion criteria alert — surfaced separately so it can't be missed,
+  // with a one-click action to exclude (reviewer still confirms by clicking).
+  const ttrExclusionReasons = getTTRExclusionCriteria(p, visits);
+  let ttrExclusionHtml = '';
+  if(ttrExclusionReasons.length && !p.ttrExcluded){
+    const reasonsJoined = ttrExclusionReasons.join('; ');
+    ttrExclusionHtml = '<div class="alert-banner" style="background:#FDECEA; border-color:#E8A79A; color:#8C2E1E;">'+
+      '<span>⛔</span><div>'+
+        '<b>TTR exclusion criteria met</b> — consider excluding this patient from the average TTR calculation:'+
+        '<ul class="flag-list">'+ttrExclusionReasons.map(f=>'<li>'+escapeHtml(f)+'</li>').join('')+'</ul>'+
+        '<button class="btn btn-danger" style="margin-top:6px;" onclick="quickExcludeFromTTR(\''+p.id+'\', '+JSON.stringify(reasonsJoined)+')">Exclude from TTR now</button>'+
+      '</div></div>';
+  }
+
   let alertHtml = "";
   if(ttr !== null && ttr < 60){
     alertHtml = '<div class="alert-banner"><span>&#9888;</span><div><b>Low TTR alert.</b> Time-in-therapeutic-range is '+ttr.toFixed(1)+'%, below the 60% quality threshold.</div></div>';
@@ -1919,7 +1990,7 @@ async function renderMain(){
         '<div class="stat-box"><div class="label">Last INR</div><div class="value">'+(lastVisit?lastVisit.inr:'--')+'</div></div>'+
       '</div>'+
     '</div>'+
-    statusStrip+passoverHtml+medicationsHtml+flagsHtml+alertHtml+
+    statusStrip+passoverHtml+medicationsHtml+ttrExclusionHtml+flagsHtml+alertHtml+
     '<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:4px;">'+
       '<div class="tabs" style="margin-bottom:0; border-bottom:none;">'+tabBtn('profile','Patient info')+tabBtn('review','New review')+tabBtn('history','History & TTR')+tabBtn('audit','Audit log')+'</div>'+
       '<button class="btn admin-only" style="font-size:12px; padding:6px 14px;" onclick="generatePatientReport()">⬇ Patient report</button>'+
@@ -2122,6 +2193,9 @@ async function renderReviewPanel(p){
     '<div class="card"><h3>Ward admission record (optional)</h3><div class="grid">'+
       '<div class="field"><label>Admission date</label><input id="rv_admit_date" type="date"></div>'+
       '<div class="field"><label>Diagnosis</label><input id="rv_admit_dx" placeholder="e.g. GI bleed"></div>'+
+      '<div class="field span2"><label style="display:flex; align-items:center; gap:8px; cursor:pointer;">'+
+        '<input type="checkbox" id="rv_admit_interrupted" style="width:16px;height:16px;"> Warfarin interrupted during this admission'+
+      '</label></div>'+
     '</div></div>'+
     '<div class="card"><h3>Plan</h3>'+
       '<div class="field" style="margin-bottom:14px;"><label>Action</label>'+
@@ -2388,6 +2462,7 @@ async function saveReview(){
     caseDiscussedDr, doctorName,
     admitDate: document.getElementById("rv_admit_date").value,
     admitDx: document.getElementById("rv_admit_dx").value.trim(),
+    admitInterrupted: document.getElementById("rv_admit_interrupted")?.checked||false,
     planAction, planDays, planLoadMg, planSubAction, planSubPct,
     newTwd, nextAppt,
     clinicalNote: ruleBox ? ruleBox.innerText.replace("Rule-based suggestion: ","") : "",
@@ -2545,6 +2620,7 @@ async function editReview(visitId){
   document.getElementById("rv_inr").value = v.inr||"";
   document.getElementById("rv_admit_date").value = v.admitDate||"";
   document.getElementById("rv_admit_dx").value = v.admitDx||"";
+  if(document.getElementById("rv_admit_interrupted")) document.getElementById("rv_admit_interrupted").checked = v.admitInterrupted||false;
   document.getElementById("rv_new_twd").value = v.newTwd||"";
   document.getElementById("rv_next_appt").value = v.nextAppt||"";
   // Pre-fill factors
@@ -2600,13 +2676,15 @@ async function renderTTROverview(){
     const visits = await loadVisits(p.id);
     const ttr = calcTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
     const extTTR = calcExtendedTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
-    ttrData.push({p, ttr, extTTR});
+    const exclusionReasons = getTTRExclusionCriteria(p, visits);
+    ttrData.push({p, ttr, extTTR, exclusionReasons});
   }
 
   const active = ttrData.filter(d => d.p.isActive !== false);
   const included = active.filter(d => !d.p.ttrExcluded && d.ttr !== null);
   const excluded = active.filter(d => d.p.ttrExcluded);
   const noData = active.filter(d => !d.p.ttrExcluded && d.ttr === null);
+  const exclusionCandidates = active.filter(d => !d.p.ttrExcluded && d.exclusionReasons.length > 0);
 
   const below60 = included.filter(d => d.ttr < 60).length;
   const pctTTR60 = included.length > 0 ? ((included.length - below60) / included.length) * 100 : null;
@@ -2626,6 +2704,7 @@ async function renderTTROverview(){
     let s = '';
     if(d.p.isActive===false) s += '<span class="status-badge sb-inactive">Inactive</span>';
     if(d.p.ttrExcluded) s += '<span class="status-badge sb-excluded">Excluded</span>';
+    else if(d.exclusionReasons.length) s += '<span class="status-badge" style="background:#FDECEA; color:#8C2E1E;" title="'+escapeHtml(d.exclusionReasons.join('; '))+'">⛔ Exclusion criteria met</span>';
     return s;
   }
 
@@ -2666,6 +2745,18 @@ async function renderTTROverview(){
         '<div class="ttr-count-box"><div class="cv-label">No data</div><div class="cv-value">'+noData.length+'</div></div>'+
       '</div>'+
     '</div>'+
+    (exclusionCandidates.length ? (
+      '<div class="card" style="border-color:#E8A79A;">'+
+        '<h3 style="color:#8C2E1E;">⛔ TTR exclusion candidates ('+exclusionCandidates.length+')</h3>'+
+        '<p class="hint" style="margin-bottom:12px;">These patients meet one or more clinic criteria for exclusion from the TTR average but are still marked Included. Review and exclude if appropriate.</p>'+
+        exclusionCandidates.map(d =>
+          '<div class="dash-defaulter-row" onclick="selectPatient(\''+d.p.id+'\')">'+
+            '<div><div class="dash-defaulter-name">'+escapeHtml(d.p.name)+'</div>'+
+            '<div class="dash-defaulter-meta">'+escapeHtml(d.exclusionReasons.join(' · '))+'</div></div>'+
+          '</div>'
+        ).join('')+
+      '</div>'
+    ) : '')+
     '<div class="card">'+
       '<h3>All patients</h3>'+
       '<p class="hint" style="margin-bottom:12px;">Toggle Active/Inactive for clinic workflow; Included/Excluded for TTR average. Set exclusion reasons in the patient Profile tab.</p>'+
