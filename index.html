@@ -1738,10 +1738,9 @@ function buildDefaulterCard(overdue, missingAppt){
 
 function buildTTRSummaryCard(){
   const included = patients.filter(p=>!p.ttrExcluded&&p.isActive!==false).map(p=>({p,ttr:ttrCache[p.id]?.ttr??null})).filter(d=>d.ttr!==null);
-  const avgTTR = included.length ? included.reduce((s,d)=>s+d.ttr,0)/included.length : null;
   const below60 = included.filter(d=>d.ttr<60).sort((a,b)=>a.ttr-b.ttr);
-  const pct = included.length ? Math.round(below60.length/included.length*100) : 0;
-  const avgClass = avgTTR===null?'var(--ink)':avgTTR<60?'var(--accent)':'var(--good)';
+  const pctTTR60 = included.length ? ((included.length-below60.length)/included.length*100) : null;
+  const pctClass = pctTTR60===null?'var(--ink)':pctTTR60<60?'var(--accent)':'var(--good)';
   const worstRows = below60.slice(0,4).map(d=>`
     <div class="dash-ttr-row">
       <div class="dash-ttr-name" onclick="selectPatient('${d.p.id}')">${escapeHtml(d.p.name)}</div>
@@ -1754,7 +1753,7 @@ function buildTTRSummaryCard(){
     </div>
     <div class="dash-card-body">
       <div class="dash-stat-row">
-        <div class="dash-stat"><div class="dash-stat-val" style="color:${avgClass};">${avgTTR===null?'—':avgTTR.toFixed(1)+'%'}</div><div class="dash-stat-lbl">Avg TTR</div></div>
+        <div class="dash-stat"><div class="dash-stat-val" style="color:${pctClass};">${pctTTR60===null?'—':pctTTR60.toFixed(1)+'%'}</div><div class="dash-stat-lbl">% TTR &ge;60%</div></div>
         <div class="dash-stat"><div class="dash-stat-val" style="color:${below60.length>0?'var(--accent)':'var(--good)'};">${below60.length}</div><div class="dash-stat-lbl">Below 60%</div></div>
         <div class="dash-stat"><div class="dash-stat-val">${included.length}</div><div class="dash-stat-lbl">Patients</div></div>
       </div>
