@@ -884,10 +884,10 @@ async function fetchAuditLog(recordId){
   }catch(e){ return []; }
 }
 function rowToPatient(r){
-  return {id:r.id, name:r.name, mrn:r.mrn, phone:r.phone||"", indication:r.indication||"", targetLow:r.target_low, targetHigh:r.target_high, duration:r.duration||"", notes:r.notes||"", passoverNotes:r.passover_notes||"", initiationDate:r.initiation_date||"", isActive:r.is_active!==false, ttrExcluded:r.ttr_excluded||false, ttrExcludeReason:r.ttr_exclude_reason||""};
+  return {id:r.id, name:r.name, mrn:r.mrn, phone:r.phone||"", indication:r.indication||"", targetLow:r.target_low, targetHigh:r.target_high, duration:r.duration||"", notes:r.notes||"", passoverNotes:r.passover_notes||"", initiationDate:r.initiation_date||"", isActive:r.is_active!==false, ttrExcluded:r.ttr_excluded||false, ttrExcludeReason:r.ttr_exclude_reason||"", medications:r.medications||[]};
 }
 function patientToRow(p){
-  return {id:p.id, name:p.name, mrn:p.mrn, phone:p.phone, indication:p.indication, target_low:p.targetLow, target_high:p.targetHigh, duration:p.duration, notes:p.notes||"", passover_notes:p.passoverNotes||"", initiation_date:p.initiationDate||null, is_active:p.isActive!==false, ttr_excluded:p.ttrExcluded||false, ttr_exclude_reason:p.ttrExcludeReason||""};
+  return {id:p.id, name:p.name, mrn:p.mrn, phone:p.phone, indication:p.indication, target_low:p.targetLow, target_high:p.targetHigh, duration:p.duration, notes:p.notes||"", passover_notes:p.passoverNotes||"", initiation_date:p.initiationDate||null, is_active:p.isActive!==false, ttr_excluded:p.ttrExcluded||false, ttr_exclude_reason:p.ttrExcludeReason||"", medications:p.medications||[]};
 }
 function rowToVisit(r){
   return {id:r.id, date:r.date, twd:r.twd, inr:r.inr, factors:r.factors||[], factorNotes:r.factor_notes||{}, admitDate:r.admit_date||"", admitDx:r.admit_dx||"", planAction:r.plan_action, planDays:r.plan_days, planLoadMg:r.plan_load_mg, planSubAction:r.plan_sub_action||"", planSubPct:r.plan_sub_pct, newTwd:r.new_twd, nextAppt:r.next_appt||"", clinicalNote:r.clinical_note||"", planNotes:r.plan_notes||"", regimeLabel:r.regime_label||"", inrDayBefore:r.inr_day_before||false, longerTca:r.longer_tca||false, caseDiscussedDr:r.case_discussed_dr||false, doctorName:r.doctor_name||"", reviewer:r.reviewer||"", updatedAt:r.updated_at||null};
@@ -1901,6 +1901,15 @@ async function renderMain(){
       '</div>'+
     '</div>';
 
+  // Medication interaction banner — only shown if there's at least one
+  // medication flagged as affecting INR, so reviewers see it at a glance.
+  const interactingMeds = (p.medications||[]).filter(m=>m.effect==='increase'||m.effect==='decrease');
+  const medicationsHtml = interactingMeds.length===0 ? '' :
+    '<div class="flag" style="margin-bottom:14px; background:#FFF8EC; border-color:#E8C874; color:#5A4200;">'+
+      '<b>💊 Medications affecting INR:</b> '+
+      interactingMeds.map(m=>escapeHtml(m.name)+' ('+(m.effect==='increase'?'↑ increases':'↓ decreases')+')').join(', ')+
+    '</div>';
+
   main.innerHTML =
     '<div class="patient-header">'+
       '<div><h1>'+escapeHtml(p.name)+'</h1><div class="meta">MRN '+escapeHtml(p.mrn)+(p.indication?' &middot; '+escapeHtml(p.indication):'')+'</div></div>'+
@@ -1911,7 +1920,7 @@ async function renderMain(){
         '<div class="stat-box"><div class="label">Last INR</div><div class="value">'+(lastVisit?lastVisit.inr:'--')+'</div></div>'+
       '</div>'+
     '</div>'+
-    statusStrip+passoverHtml+flagsHtml+alertHtml+
+    statusStrip+passoverHtml+medicationsHtml+flagsHtml+alertHtml+
     '<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:4px;">'+
       '<div class="tabs" style="margin-bottom:0; border-bottom:none;">'+tabBtn('profile','Patient info')+tabBtn('review','New review')+tabBtn('history','History & TTR')+tabBtn('audit','Audit log')+'</div>'+
       '<button class="btn admin-only" style="font-size:12px; padding:6px 14px;" onclick="generatePatientReport()">⬇ Patient report</button>'+
@@ -1948,8 +1957,10 @@ function showTab(key){
 }
 
 // ---------- Profile panel ----------
+let profileMedications = [];
 function renderProfilePanel(p){
   const el = document.getElementById("panelProfile");
+  profileMedications = Array.isArray(p.medications) ? p.medications.map(m=>({...m})) : [];
   el.innerHTML =
     '<div class="card"><h3>Basic information</h3><div class="grid">'+
       field('Name','pf_name',p.name)+field('MRN','pf_mrn',p.mrn)+field('Phone number','pf_phone',p.phone)+
@@ -1961,6 +1972,19 @@ function renderProfilePanel(p){
         '<textarea id="pf_notes" rows="5" placeholder="Type note then press Enter to add numbered points…" style="resize:vertical;" onkeydown="handleNotesEnter(event)">'+escapeHtml(p.notes||'')+'</textarea>'+
       '</div>'+
     '</div></div>'+
+    '<div class="card"><h3>Current medications</h3>'+
+      '<p class="hint" style="margin-bottom:10px;">Track medications that may interact with warfarin. Each entry is tagged by its typical effect on INR.</p>'+
+      '<div id="medList" style="margin-bottom:12px;"></div>'+
+      '<div class="grid3">'+
+        '<div class="field"><label>Medication name</label><input id="med_name_input" placeholder="e.g. Amiodarone" onkeydown="if(event.key===\'Enter\'){event.preventDefault(); addMedication();}"></div>'+
+        '<div class="field"><label>Effect on INR</label><select id="med_effect_input">'+
+          '<option value="increase">Increases INR</option>'+
+          '<option value="decrease">Decreases INR</option>'+
+          '<option value="none">No effect</option>'+
+        '</select></div>'+
+        '<div class="field" style="justify-content:flex-end;"><button class="btn" onclick="addMedication()">+ Add medication</button></div>'+
+      '</div>'+
+    '</div>'+
     '<div class="card"><h3>Status &amp; TTR inclusion</h3>'+
       '<div class="grid">'+
         '<div class="field"><label>Patient status</label><select id="pf_isActive"><option value="true" '+(p.isActive!==false?'selected':'')+'>Active</option><option value="false" '+(p.isActive===false?'selected':'')+'>Inactive</option></select></div>'+
@@ -1970,6 +1994,44 @@ function renderProfilePanel(p){
       '<p class="hint">Inactive patients still appear in the patient list but are dimmed. Excluded patients are removed from the average TTR calculation shown in the TTR view.</p>'+
     '</div>'+
     '<div class="row-actions"><button class="btn btn-danger admin-only" onclick="deletePatient()">Delete patient</button><button class="btn btn-primary" onclick="saveProfile()">Save changes</button></div>';
+  renderMedicationsList();
+}
+function medEffectBadge(effect){
+  if(effect==="increase") return '<span class="tag" style="background:#FDEBEA; color:#B33A2E;">↑ Increases INR</span>';
+  if(effect==="decrease") return '<span class="tag" style="background:#EDF3FB; color:#2C5A8C;">↓ Decreases INR</span>';
+  return '<span class="tag" style="background:#EEF0EA; color:#5B6B4E;">No effect</span>';
+}
+function renderMedicationsList(){
+  const list = document.getElementById("medList");
+  if(!list) return;
+  if(profileMedications.length===0){
+    list.innerHTML = '<div class="empty-state" style="padding:10px 0;">No medications added yet.</div>';
+    return;
+  }
+  list.innerHTML = profileMedications.map((m,i)=>
+    '<div style="display:flex; align-items:center; justify-content:space-between; padding:8px 10px; border:1px solid var(--line); border-radius:8px; margin-bottom:6px; background:#FCFBF7;">'+
+      '<div style="font-size:13px; font-weight:600;">'+escapeHtml(m.name)+'</div>'+
+      '<div style="display:flex; align-items:center; gap:10px;">'+
+        medEffectBadge(m.effect)+
+        '<a href="#" style="font-size:12px; color:var(--accent);" onclick="event.preventDefault(); removeMedication('+i+')">Remove</a>'+
+      '</div>'+
+    '</div>'
+  ).join('');
+}
+function addMedication(){
+  const nameEl = document.getElementById("med_name_input");
+  const effectEl = document.getElementById("med_effect_input");
+  const name = nameEl.value.trim();
+  if(!name){ showToast("Enter a medication name first","error",2500); return; }
+  profileMedications.push({name, effect: effectEl.value});
+  nameEl.value = "";
+  effectEl.value = "increase";
+  renderMedicationsList();
+  nameEl.focus();
+}
+function removeMedication(index){
+  profileMedications.splice(index,1);
+  renderMedicationsList();
 }
 function field(label,id,value,type,step){
   type = type||'text';
@@ -2009,6 +2071,7 @@ async function saveProfile(){
   p.isActive = document.getElementById("pf_isActive").value === "true";
   p.ttrExcluded = document.getElementById("pf_ttrExcluded").value === "true";
   p.ttrExcludeReason = document.getElementById("pf_ttrExcludeReason").value.trim();
+  p.medications = profileMedications;
   await upsertPatientRow(p);
   showToast("Patient saved ✓","success",2000);
   await renderPatientList();
@@ -2346,12 +2409,17 @@ async function saveReview(){
     showToast("Review updated ✓","success",2000);
   } else {
     // ── Auto-cancel old TCA if new date is different ──
+    // IMPORTANT: only cancel a genuinely different FUTURE appointment (a stray
+    // duplicate booking), never today's own appointment — that's the one the
+    // patient is attending right now. Using "> today" (not ">=") keeps that
+    // record's nextAppt intact so the patient still shows up, just as "Done",
+    // on today's appointment list/schedule instead of disappearing entirely.
     if(nextAppt){
       const existingVisits = await loadVisits(currentPatientId);
       const today = localDateStr(new Date());
       const oldTcaVisit = [...existingVisits]
         .sort((a,b)=>new Date(b.date)-new Date(a.date))
-        .find(v=>v.nextAppt && v.nextAppt >= today && v.nextAppt !== nextAppt);
+        .find(v=>v.nextAppt && v.nextAppt > today && v.nextAppt !== nextAppt);
       if(oldTcaVisit){
         // Clear the old TCA date from that visit
         oldTcaVisit.nextAppt = "";
@@ -3201,6 +3269,7 @@ async function generatePatientReport(patientId){
     <div class="meta" style="margin-top:4px;">Phone: ${escapeHtml(p.phone||'—')} &nbsp;|&nbsp; Initiation: ${escapeHtml(p.initiationDate||'—')} &nbsp;|&nbsp; Status: ${escapeHtml(status.label)}</div>
     ${p.notes?'<div class="flag" style="margin-top:8px;"><b>Clinical notes:</b><br>'+escapeHtml(p.notes).replace(/\n/g,'<br>')+'</div>':''}
     ${p.passoverNotes?'<div class="flag" style="margin-top:8px; background:#FFFBEA; border-color:#E8C060; color:#5A3D00;"><b>📋 Passover notes:</b><br>'+escapeHtml(p.passoverNotes).replace(/\n/g,'<br>')+'</div>':''}
+    ${(p.medications&&p.medications.length)?'<div class="flag" style="margin-top:8px;"><b>💊 Current medications:</b><br>'+p.medications.map(m=>escapeHtml(m.name)+' — '+(m.effect==='increase'?'Increases INR':m.effect==='decrease'?'Decreases INR':'No effect')).join('<br>')+'</div>':''}
     <h2>TTR Summary</h2>
     <table><tr>
       <th>Overall TTR (${p.targetLow}–${p.targetHigh})</th>
@@ -3411,16 +3480,22 @@ async function generateTTRReport(){
 }
 
 async function generateAppointmentList(){
-  const today = new Date(); today.setHours(0,0,0,0);
+  const today = localDateStr(new Date());
   const appts=[];
   for(const p of patients){
     if(p.isActive===false) continue;
     const visits=await loadVisits(p.id);
     const ttr=calcTTR(visits,parseFloat(p.targetLow),parseFloat(p.targetHigh));
-    const sorted=[...visits].filter(v=>v.date&&v.nextAppt).sort((a,b)=>new Date(b.date)-new Date(a.date));
-    if(!sorted.length) continue;
-    const last=sorted[0];
-    appts.push({p, apptDateStr:last.nextAppt, apptDate:new Date(last.nextAppt), lastINR:last.inr, lastTWD:last.newTwd||last.twd, inrDayBefore:last.inrDayBefore||false, ttr});
+    // Include every appointment ever set (not just the patient's single latest
+    // one) so a patient who has already been seen stays on the list for that
+    // date, tagged as Done, instead of disappearing once a new future TCA
+    // is set for them.
+    const withAppt = visits.filter(v=>v.nextAppt);
+    for(const v of withAppt){
+      const reviewed = isVisitReviewedForAppt(visits, v.nextAppt);
+      const status = reviewed ? 'done' : (v.nextAppt < today ? 'missed' : 'pending');
+      appts.push({p, apptDateStr:v.nextAppt, apptDate:new Date(v.nextAppt), lastINR:v.inr, lastTWD:v.newTwd||v.twd, inrDayBefore:v.inrDayBefore||false, ttr, status});
+    }
   }
   appts.sort((a,b)=>a.apptDate-b.apptDate);
 
@@ -3444,6 +3519,7 @@ async function generateAppointmentList(){
           <th>Date</th>
           <th>Name</th>
           <th>MRN</th>
+          <th>Status</th>
           <th>Target INR</th>
           <th>TTR</th>
           <th>INR day before ✓</th>
@@ -3453,11 +3529,17 @@ async function generateAppointmentList(){
       <tbody>
         ${appts.map((a,i)=>{
           const ttrcls=a.ttr===null?'':( a.ttr<60?'bad':'good');
-          return `<tr data-date="${a.apptDateStr}">
+          const statusHtml = a.status==='done'
+            ? '<span class="badge good">✓ Done</span>'
+            : a.status==='missed'
+              ? '<span class="badge bad">⚠ Missed</span>'
+              : '<span class="badge" style="background:#FFF3D6;color:#8A6100;">⏳ Pending</span>';
+          return `<tr data-date="${a.apptDateStr}" style="${a.status==='done'?'opacity:0.65;':''}">
             <td>${i+1}</td>
             <td>${a.apptDateStr}</td>
             <td style="font-weight:600;">${escapeHtml(a.p.name)}</td>
             <td style="font-family:monospace;font-size:11.5px;">${escapeHtml(a.p.mrn)}</td>
+            <td>${statusHtml}</td>
             <td>${a.p.targetLow}–${a.p.targetHigh}</td>
             <td>${a.ttr===null?'—':'<span class="badge '+ttrcls+'">'+a.ttr.toFixed(1)+'%</span>'}</td>
             <td style="text-align:center; font-size:18px;">${a.inrDayBefore?'☑':'☐'}</td>
