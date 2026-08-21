@@ -418,9 +418,9 @@
     <button class="topbar-btn" id="navPatients" onclick="switchView('patients')">Patients</button>
     <button class="topbar-btn" id="navTTR" onclick="switchView('ttr')">TTR</button>
     <button class="topbar-btn" id="navDefaulters" onclick="switchView('defaulters')">Defaulters</button>
-    <button class="topbar-btn" id="navAnalysis" onclick="switchView('analysis')">Analysis</button>
+    <button class="topbar-btn admin-only" id="navAnalysis" onclick="switchView('analysis')" style="display:none;">Analysis</button>
     <button class="topbar-btn" id="navSchedule" onclick="switchView('schedule')">Schedule</button>
-    <button class="topbar-btn" id="navSettings" onclick="switchView('settings')">Dosing rules</button>
+    <button class="topbar-btn admin-only" id="navSettings" onclick="switchView('settings')" style="display:none;">Dosing rules</button>
     <button class="topbar-btn admin-only" id="navAdmin" onclick="switchView('admin')" style="display:none;">Admin</button>
     <div id="topbarBreadcrumb" style="font-size:12px; color:#9AA6BC; margin-left:4px;"></div>
     <div class="topbar-right">
@@ -449,8 +449,8 @@
       <div class="nav-btn active" id="navPatients" onclick="switchView('patients')" style="flex:1 1 70px;">Patients</div>
       <div class="nav-btn" id="navTTR" onclick="switchView('ttr')" style="flex:1 1 50px;">TTR</div>
       <div class="nav-btn" id="navDefaulters" onclick="switchView('defaulters')" style="flex:1 1 70px;">Defaulters</div>
-      <div class="nav-btn" id="navAnalysis" onclick="switchView('analysis')" style="flex:1 1 70px;">Analysis</div>
-      <div class="nav-btn" id="navSettings" onclick="switchView('settings')" style="flex:1 1 80px;">Rules</div>
+      <div class="nav-btn admin-only" id="navAnalysis" onclick="switchView('analysis')" style="flex:1 1 70px; display:none;">Analysis</div>
+      <div class="nav-btn admin-only" id="navSettings" onclick="switchView('settings')" style="flex:1 1 80px; display:none;">Rules</div>
     </div>
     <div class="db-status" id="dbStatusMobile" style="display:none;"></div>
     <input class="search" id="searchBox" placeholder="Search name or MRN" oninput="renderPatientList()">
@@ -485,7 +485,7 @@
     <button class="mobile-tab" id="mTabDefaulters" onclick="mobileSwitchView('defaulters')">
       <svg viewBox="0 0 24 24"><use href="#i-bell"/></svg>Defaulters
     </button>
-    <button class="mobile-tab" id="mTabAnalysis" onclick="mobileSwitchView('analysis')">
+    <button class="mobile-tab admin-only" id="mTabAnalysis" onclick="mobileSwitchView('analysis')" style="display:none;">
       <svg viewBox="0 0 24 24"><use href="#i-cal"/></svg>Analysis
     </button>
     <button class="mobile-tab" id="mTabMenu" onclick="toggleSidebar()">
@@ -1135,10 +1135,17 @@ function switchView(view){
   if(view==="patients") showAllPatients("");
   else if(view==="ttr") renderTTROverview();
   else if(view==="defaulters") renderDefaultersView();
-  else if(view==="analysis") renderAnalysisView();
+  else if(view==="analysis"){
+    if(currentUserRole!=="admin"){ showToast("Analysis is admin only.","error"); switchView("patients"); return; }
+    renderAnalysisView();
+  }
   else if(view==="schedule") renderScheduleView();
   else if(view==="admin") renderAdminView();
-  else renderSettingsView();
+  else if(view==="settings"){
+    if(currentUserRole!=="admin"){ showToast("Dosing rules are admin only.","error"); switchView("patients"); return; }
+    renderSettingsView();
+  }
+  else showAllPatients("");
 }
 
 function togglePassoverEdit(){
