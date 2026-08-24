@@ -2170,6 +2170,71 @@ async function deletePatient(){
   await renderMain();
 }
 
+// ---------- Regime insights ----------
+// Pairs each regime/TWD that was prescribed with the INR result at the
+// FOLLOWING visit (since a regime's effect only shows up next time), then
+// aggregates by regime to see which one has kept this patient in range most.
+function analyzeRegimeHistory(visits, low, high){
+  const sorted = [...visits].filter(v=>v.date).sort((a,b)=>new Date(a.date)-new Date(b.date));
+  const outcomes = [];
+  let activeLabel = null;
+  for(let i=0;i<sorted.length;i++){
+    const v = sorted[i];
+    if(activeLabel !== null){
+      const inr = parseFloat(v.inr);
+      if(!isNaN(inr)){
+        const inRange = inr>=low && inr<=high;
+        const confounded = !!(v.factors && v.factors.length && !(v.factors.length===1 && v.factors[0]==="No significant factor detected"));
+        outcomes.push({regime:activeLabel, inr, inRange, confounded});
+      }
+    }
+    if(v.regimeLabel) activeLabel = v.regimeLabel;
+    else if(v.newTwd) activeLabel = 'TWD '+v.newTwd+'mg/week';
+    // else: plan was "continue" with no explicit regime — carry the active one forward
+  }
+  function summarize(list){
+    const groups = {};
+    list.forEach(o=>{
+      if(!groups[o.regime]) groups[o.regime] = {regime:o.regime, n:0, inRangeN:0, sumInr:0};
+      const g = groups[o.regime];
+      g.n++; if(o.inRange) g.inRangeN++; g.sumInr += o.inr;
+    });
+    return Object.values(groups).map(g=>({
+      regime:g.regime, n:g.n, inRangePct: g.n ? (g.inRangeN/g.n*100) : 0, avgInr: g.n ? (g.sumInr/g.n) : 0
+    })).sort((a,b)=> b.inRangePct - a.inRangePct || b.n - a.n);
+  }
+  return {all: summarize(outcomes), clean: summarize(outcomes.filter(o=>!o.confounded)), totalOutcomes: outcomes.length};
+}
+function regimeInsightsTable(list){
+  if(!list.length) return '<div class="hint">No readings in this category yet.</div>';
+  return '<table class="ttr-table" style="margin-top:8px;"><thead><tr><th>Regime used</th><th>Times used</th><th>In-range %</th><th>Avg INR</th></tr></thead><tbody>'+
+    list.map((g,i)=>'<tr'+(i===0?' style="background:#EFF7EE;"':'')+'><td>'+escapeHtml(g.regime)+(i===0?' <span class="tag" style="background:#DCEEDA; color:#2E6B2E;">Best so far</span>':'')+'</td><td>'+g.n+'</td><td>'+g.inRangePct.toFixed(0)+'%</td><td>'+g.avgInr.toFixed(2)+'</td></tr>').join('')+
+    '</tbody></table>';
+}
+function buildRegimeInsightsHtml(p, visits){
+  const low = parseFloat(p.targetLow||2), high = parseFloat(p.targetHigh||3);
+  const analysis = analyzeRegimeHistory(visits, low, high);
+  window._regimeInsights = analysis;
+  if(analysis.totalOutcomes===0){
+    return '<div class="card" id="regimeInsightsCard"><h3>Regime insights</h3><div class="hint">Not enough visit history yet to analyze which regime works best for this patient — insights will appear once there are at least two reviews.</div></div>';
+  }
+  return '<div class="card" id="regimeInsightsCard"><h3>Regime insights <span style="font-weight:400; font-size:12px; color:var(--ink-soft);">— based on this patient\'s INR history</span></h3>'+
+    '<div class="row-actions" style="margin-bottom:2px;">'+
+      '<button class="btn btn-primary" id="riTabAll" style="font-size:11.5px; padding:5px 12px;" onclick="toggleRegimeInsightView(\'all\')">All readings</button>'+
+      '<button class="btn" id="riTabClean" style="font-size:11.5px; padding:5px 12px;" onclick="toggleRegimeInsightView(\'clean\')">Excluding flagged factors</button>'+
+    '</div>'+
+    '<div id="regimeInsightsTableWrap">'+regimeInsightsTable(analysis.all)+'</div>'+
+    '<div class="hint" style="margin-top:6px;">"Best so far" = highest % of subsequent readings landing in target range. Small sample sizes (1–2 uses) are shown as-is — treat with caution. "Excluding flagged factors" drops readings where a contributing factor (e.g. non-compliance, diet, interaction) was recorded, isolating the regime\'s own effect.</div>'+
+  '</div>';
+}
+function toggleRegimeInsightView(mode){
+  const analysis = window._regimeInsights;
+  if(!analysis) return;
+  document.getElementById("regimeInsightsTableWrap").innerHTML = regimeInsightsTable(mode==='clean'?analysis.clean:analysis.all);
+  document.getElementById("riTabAll").classList.toggle("btn-primary", mode==='all');
+  document.getElementById("riTabClean").classList.toggle("btn-primary", mode==='clean');
+}
+
 // ---------- Review panel ----------
 async function renderReviewPanel(p){
   const el = document.getElementById("panelReview");
@@ -2178,6 +2243,7 @@ async function renderReviewPanel(p){
   const lastVisit = [...visits].filter(v=>v.date).sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
   const lastTwd = lastVisit?.newTwd || lastVisit?.twd || "";
   const lastRegime = lastVisit?.regimeLabel || "";
+  const regimeInsightsHtml = buildRegimeInsightsHtml(p, visits);
 
   const factorChecks = FACTOR_OPTIONS.map((f,idx) =>
     '<div class="factor-row">'+
@@ -2204,6 +2270,7 @@ async function renderReviewPanel(p){
         '<input type="checkbox" id="rv_admit_interrupted" style="width:16px;height:16px;"> Warfarin interrupted during this admission'+
       '</label></div>'+
     '</div></div>'+
+    regimeInsightsHtml+
     '<div class="card"><h3>Plan</h3>'+
       '<div class="field" style="margin-bottom:14px;"><label>Action</label>'+
         '<select id="rv_plan_action" onchange="onPlanChange()">'+
