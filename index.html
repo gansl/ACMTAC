@@ -854,7 +854,10 @@ function goHome(){
   currentView = "patients";
   navHistory = [];
   updateBreadcrumb("home", null, null);
-  renderDashboard();
+  renderDashboard().catch(e=>{
+    console.error("renderDashboard failed:", e);
+    showToast("Homepage failed to load: "+(e?.message||e),"error",6000);
+  });
   syncMobileTabs("patients");
 }
 
@@ -1601,23 +1604,45 @@ async function renderDashboard(){
   const name = currentReviewerName || currentSession?.user?.email?.split('@')[0] || "Reviewer";
   const dateStr = new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
 
+  // Each card is built defensively — if one fails, the others still render
+  // instead of leaving the whole homepage blank.
+  function errorCard(title, icon, e){
+    console.error("Dashboard card failed:", title, e);
+    return `<div class="dash-card">
+      <div class="dash-card-header"><div class="dash-card-title">${title}</div><div class="dash-card-icon" style="background:#FDECEA;">${icon}</div></div>
+      <div class="dash-card-body"><div class="dash-empty" style="color:var(--accent); font-style:normal;">Couldn't load this section: ${escapeHtml(e?.message||String(e))}</div></div>
+    </div>`;
+  }
+
   // ── 1. Build patients card (instant, searchable) ──
-  const sortedPts = [...patients].filter(p=>p.isActive!==false).sort((a,b)=>a.name.localeCompare(b.name));
-  const patientsCardHtml = buildPatientsCard(sortedPts, "");
+  let patientsCardHtml;
+  try{
+    const sortedPts = [...patients].filter(p=>p.isActive!==false).sort((a,b)=>a.name.localeCompare(b.name));
+    patientsCardHtml = buildPatientsCard(sortedPts, "");
+  }catch(e){ patientsCardHtml = errorCard("Patients","👤",e); }
 
   // ── 2. Appointment card for today ──
-  const apptCardHtml = await buildApptCard(today);
+  let apptCardHtml;
+  try{ apptCardHtml = await buildApptCard(today); }
+  catch(e){ apptCardHtml = errorCard("Appointments","📅",e); }
 
   // ── 3. Defaulters card ──
-  for(const p of patients){ if(!visitsCache[p.id]) await loadVisits(p.id); }
-  const {overdue, missingAppt} = getDefaulters(patients, visitsCache);
-  const defaulterCardHtml = buildDefaulterCard(overdue, missingAppt);
+  let defaulterCardHtml;
+  try{
+    for(const p of patients){ if(!visitsCache[p.id]) await loadVisits(p.id); }
+    const {overdue, missingAppt} = getDefaulters(patients, visitsCache);
+    defaulterCardHtml = buildDefaulterCard(overdue, missingAppt);
+  }catch(e){ defaulterCardHtml = errorCard("Defaulters","⚠️",e); }
 
   // ── 4. TTR card ──
-  const ttrCardHtml = buildTTRSummaryCard();
+  let ttrCardHtml;
+  try{ ttrCardHtml = buildTTRSummaryCard(); }
+  catch(e){ ttrCardHtml = errorCard("TTR overview","📊",e); }
 
   // ── 5. Clinic schedule card (next 4 Thursdays) ──
-  const scheduleCardHtml = await buildScheduleSummaryCard();
+  let scheduleCardHtml;
+  try{ scheduleCardHtml = await buildScheduleSummaryCard(); }
+  catch(e){ scheduleCardHtml = errorCard("Clinic Schedule","🗓️",e); }
 
   main.innerHTML =
     '<div class="dashboard">'+
@@ -1737,6 +1762,7 @@ async function buildApptCard(dateStr){
       </div>
       ${a.reviewed?'<span class="dash-status-done">✓ Reviewed</span>':'<span class="dash-status-pending">⏳ Pending</span>'}
     </div>`).join('');
+  const apptCount=appts.length, pendingCount=appts.filter(a=>!a.reviewed).length;
   return `<div class="dash-card">
     <div class="dash-card-header">
       <div class="dash-card-title">Appointments</div>
