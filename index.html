@@ -536,6 +536,8 @@
     <h3>New patient</h3>
     <div class="field" style="margin-bottom:10px;"><label>Full name</label><input id="np_name" placeholder="e.g. Tan Mei Ling"></div>
     <div class="field" style="margin-bottom:10px;"><label>MRN</label><input id="np_mrn" placeholder="e.g. A1234567"></div>
+    <div class="field" style="margin-bottom:10px;"><label>First appointment date (optional)</label><input id="np_first_appt" type="date"></div>
+    <p class="hint" style="margin:-4px 0 10px;">If set, this shows the patient on the homepage/schedule appointment list before their first review is done. It's cleared automatically once you save their first review.</p>
     <div class="row-actions">
       <button class="btn" onclick="closeNewPatientModal()">Cancel</button>
       <button class="btn btn-primary" onclick="createPatient()">Create</button>
@@ -950,10 +952,10 @@ async function fetchAuditLog(recordId){
   }catch(e){ return []; }
 }
 function rowToPatient(r){
-  return {id:r.id, name:r.name, mrn:r.mrn, phone:r.phone||"", indication:r.indication||"", targetLow:r.target_low, targetHigh:r.target_high, duration:r.duration||"", notes:r.notes||"", passoverNotes:r.passover_notes||"", initiationDate:r.initiation_date||"", isActive:r.is_active!==false, ttrExcluded:r.ttr_excluded||false, ttrExcludeReason:r.ttr_exclude_reason||"", medications:r.medications||[]};
+  return {id:r.id, name:r.name, mrn:r.mrn, phone:r.phone||"", indication:r.indication||"", targetLow:r.target_low, targetHigh:r.target_high, duration:r.duration||"", notes:r.notes||"", passoverNotes:r.passover_notes||"", initiationDate:r.initiation_date||"", isActive:r.is_active!==false, ttrExcluded:r.ttr_excluded||false, ttrExcludeReason:r.ttr_exclude_reason||"", medications:r.medications||[], pendingFirstAppt:r.pending_first_appt||""};
 }
 function patientToRow(p){
-  return {id:p.id, name:p.name, mrn:p.mrn, phone:p.phone, indication:p.indication, target_low:p.targetLow, target_high:p.targetHigh, duration:p.duration, notes:p.notes||"", passover_notes:p.passoverNotes||"", initiation_date:p.initiationDate||null, is_active:p.isActive!==false, ttr_excluded:p.ttrExcluded||false, ttr_exclude_reason:p.ttrExcludeReason||"", medications:p.medications||[]};
+  return {id:p.id, name:p.name, mrn:p.mrn, phone:p.phone, indication:p.indication, target_low:p.targetLow, target_high:p.targetHigh, duration:p.duration, notes:p.notes||"", passover_notes:p.passoverNotes||"", initiation_date:p.initiationDate||null, is_active:p.isActive!==false, ttr_excluded:p.ttrExcluded||false, ttr_exclude_reason:p.ttrExcludeReason||"", medications:p.medications||[], pending_first_appt:p.pendingFirstAppt||null};
 }
 function rowToVisit(r){
   return {id:r.id, date:r.date, twd:r.twd, inr:r.inr, factors:r.factors||[], factorNotes:r.factor_notes||{}, admitDate:r.admit_date||"", admitDx:r.admit_dx||"", admitInterrupted:r.admit_interrupted||false, planAction:r.plan_action, planDays:r.plan_days, planLoadMg:r.plan_load_mg, planSubAction:r.plan_sub_action||"", planSubPct:r.plan_sub_pct, newTwd:r.new_twd, nextAppt:r.next_appt||"", clinicalNote:r.clinical_note||"", planNotes:r.plan_notes||"", regimeLabel:r.regime_label||"", inrDayBefore:r.inr_day_before||false, longerTca:r.longer_tca||false, caseDiscussedDr:r.case_discussed_dr||false, doctorName:r.doctor_name||"", reviewer:r.reviewer||"", updatedAt:r.updated_at||null};
@@ -1328,6 +1330,7 @@ function openNewPatientFromSearch(prefillName){
   if(currentUserRole!=="admin"){ showToast("Only admins can add new patients.","error"); return; }
   document.getElementById("np_name").value = prefillName || "";
   document.getElementById("np_mrn").value = "";
+  document.getElementById("np_first_appt").value = "";
   document.getElementById("newPatientModal").classList.add("show");
 }
 
@@ -1336,15 +1339,17 @@ function openNewPatientModal(){
   if(!configOk){ alert("Connect Supabase first before adding patients."); return; }
   document.getElementById("np_name").value = "";
   document.getElementById("np_mrn").value = "";
+  document.getElementById("np_first_appt").value = "";
   document.getElementById("newPatientModal").classList.add("show");
 }
 function closeNewPatientModal(){ document.getElementById("newPatientModal").classList.remove("show"); }
 async function createPatient(){
   const name = document.getElementById("np_name").value.trim();
   const mrn = document.getElementById("np_mrn").value.trim();
+  const firstAppt = document.getElementById("np_first_appt").value || "";
   if(!name || !mrn){ alert("Enter both name and MRN."); return; }
   const id = "p_"+Date.now()+"_"+Math.random().toString(36).slice(2,7);
-  const patient = {id, name, mrn, phone:"", indication:"", targetLow:2, targetHigh:3, duration:"", isActive:true, ttrExcluded:false, ttrExcludeReason:""};
+  const patient = {id, name, mrn, phone:"", indication:"", targetLow:2, targetHigh:3, duration:"", isActive:true, ttrExcluded:false, ttrExcludeReason:"", pendingFirstAppt:firstAppt};
   patients.push(patient);
   await upsertPatientRow(patient);
   visitsCache[id] = [];
@@ -1689,7 +1694,8 @@ async function buildApptCard(dateStr){
     const thisDateAppt = visits.filter(v=>v.nextAppt===dateStr);
     if(!thisDateAppt.length) continue;
     const hasVisitToday = visits.some(v=>v.date===dateStr);
-    appts.push({p, reviewed:hasVisitToday, lastINR:thisDateAppt[0].inr, isRescheduled:false});
+    const ttr = calcTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
+    appts.push({p, reviewed:hasVisitToday, ttr, inrDayBefore:thisDateAppt[0].inrDayBefore||false, isRescheduled:false});
   }
   // 2. Rescheduled defaulters with new_tca matching this date
   try{
@@ -1704,21 +1710,29 @@ async function buildApptCard(dateStr){
         if(appts.find(a=>a.p.id===p.id)) continue; // already in list
         const visits = await loadVisits(p.id);
         const hasVisitToday = visits.some(v=>v.date===dateStr);
-        appts.push({p, reviewed:hasVisitToday, lastINR:null, isRescheduled:true});
+        const ttr = calcTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
+        appts.push({p, reviewed:hasVisitToday, ttr, inrDayBefore:false, isRescheduled:true});
       }
     }
   }catch(e){ /* table may not exist yet */ }
+  // 3. Patients scheduled for a first appointment before their first-ever review
+  for(const p of patients){
+    if(p.isActive===false || !p.pendingFirstAppt || p.pendingFirstAppt!==dateStr) continue;
+    if(appts.find(a=>a.p.id===p.id)) continue; // already in list (already reviewed at least once)
+    const visits = await loadVisits(p.id);
+    const hasVisitToday = visits.some(v=>v.date===dateStr);
+    appts.push({p, reviewed:hasVisitToday, ttr:null, inrDayBefore:false, isRescheduled:false, isFirstAppt:true});
+  }
 
   appts.sort((a,b)=>a.p.name.localeCompare(b.p.name));
   const rows = appts.map(a=>`
     <div class="dash-appt-row">
       <div>
-        <div class="dash-appt-name" onclick="selectPatient('${a.p.id}')">${escapeHtml(a.p.name)}${a.isRescheduled?'<span class="tag" style="background:#EDF7ED;color:#2E7D32;margin-left:6px;">Rescheduled</span>':''}</div>
-        <div class="dash-patient-meta">${escapeHtml(a.p.mrn)}${a.lastINR?' · Last INR: '+a.lastINR:''}</div>
+        <div class="dash-appt-name" onclick="selectPatient('${a.p.id}')">${escapeHtml(a.p.name)}${a.isRescheduled?'<span class="tag" style="background:#EDF7ED;color:#2E7D32;margin-left:6px;">Rescheduled</span>':''}${a.isFirstAppt?'<span class="tag" style="background:#FEF3E7;color:#7A4A0A;margin-left:6px;">First appointment</span>':''}</div>
+        <div class="dash-patient-meta">${escapeHtml(a.p.mrn)}${a.ttr!==null?' · TTR: '+a.ttr.toFixed(0)+'%':''}${a.inrDayBefore?' <span class="tag" style="background:#EDF3FB; color:#2C5A8C; margin-left:4px;">INR 1d before</span>':''}</div>
       </div>
       ${a.reviewed?'<span class="dash-status-done">✓ Reviewed</span>':'<span class="dash-status-pending">⏳ Pending</span>'}
     </div>`).join('');
-  const apptCount=appts.length, pendingCount=appts.filter(a=>!a.reviewed).length;
   return `<div class="dash-card">
     <div class="dash-card-header">
       <div class="dash-card-title">Appointments</div>
@@ -1749,7 +1763,8 @@ async function refreshApptCard(dateStr){
     const thisDateAppt = visits.filter(v=>v.nextAppt===dateStr);
     if(!thisDateAppt.length) continue;
     const hasVisitToday = visits.some(v=>v.date===dateStr);
-    appts.push({p, reviewed:hasVisitToday, lastINR:thisDateAppt[0].inr, isRescheduled:false});
+    const ttr = calcTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
+    appts.push({p, reviewed:hasVisitToday, ttr, inrDayBefore:thisDateAppt[0].inrDayBefore||false, isRescheduled:false});
   }
   // Rescheduled defaulters
   try{
@@ -1764,17 +1779,26 @@ async function refreshApptCard(dateStr){
         if(appts.find(a=>a.p.id===p.id)) continue;
         const visits = await loadVisits(p.id);
         const hasVisitToday = visits.some(v=>v.date===dateStr);
-        appts.push({p, reviewed:hasVisitToday, lastINR:null, isRescheduled:true});
+        const ttr = calcTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
+        appts.push({p, reviewed:hasVisitToday, ttr, inrDayBefore:false, isRescheduled:true});
       }
     }
   }catch(e){ /* ignore */ }
+  // Patients scheduled for a first appointment before their first-ever review
+  for(const p of patients){
+    if(p.isActive===false || !p.pendingFirstAppt || p.pendingFirstAppt!==dateStr) continue;
+    if(appts.find(a=>a.p.id===p.id)) continue;
+    const visits = await loadVisits(p.id);
+    const hasVisitToday = visits.some(v=>v.date===dateStr);
+    appts.push({p, reviewed:hasVisitToday, ttr:null, inrDayBefore:false, isRescheduled:false, isFirstAppt:true});
+  }
 
   appts.sort((a,b)=>a.p.name.localeCompare(b.p.name));
   const rows = appts.map(a=>`
     <div class="dash-appt-row">
       <div>
-        <div class="dash-appt-name" onclick="selectPatient('${a.p.id}')">${escapeHtml(a.p.name)}${a.isRescheduled?'<span class="tag" style="background:#EDF7ED;color:#2E7D32;margin-left:6px;">Rescheduled</span>':''}</div>
-        <div class="dash-patient-meta">${escapeHtml(a.p.mrn)}${a.lastINR?' · Last INR: '+a.lastINR:''}</div>
+        <div class="dash-appt-name" onclick="selectPatient('${a.p.id}')">${escapeHtml(a.p.name)}${a.isRescheduled?'<span class="tag" style="background:#EDF7ED;color:#2E7D32;margin-left:6px;">Rescheduled</span>':''}${a.isFirstAppt?'<span class="tag" style="background:#FEF3E7;color:#7A4A0A;margin-left:6px;">First appointment</span>':''}</div>
+        <div class="dash-patient-meta">${escapeHtml(a.p.mrn)}${a.ttr!==null?' · TTR: '+a.ttr.toFixed(0)+'%':''}${a.inrDayBefore?' <span class="tag" style="background:#EDF3FB; color:#2C5A8C; margin-left:4px;">INR 1d before</span>':''}</div>
       </div>
       ${a.reviewed?'<span class="dash-status-done">✓ Reviewed</span>':'<span class="dash-status-pending">⏳ Pending</span>'}
     </div>`).join('');
@@ -2110,6 +2134,7 @@ function renderProfilePanel(p){
       field('Indication','pf_indication',p.indication)+field('Target INR low','pf_targetLow',p.targetLow,'number','0.1')+
       field('Target INR high','pf_targetHigh',p.targetHigh,'number','0.1')+
       field('Warfarin initiation date','pf_initiationDate',p.initiationDate||'','date')+
+      field('Pending first appointment (before 1st review)','pf_pendingFirstAppt',p.pendingFirstAppt||'','date')+
       '<div class="field"><label>Duration of therapy</label><input id="pf_duration" value="'+escapeHtml(p.duration)+'" placeholder="e.g. 6 months, lifelong"></div>'+
       '<div class="field span2"><label>Clinical notes <span style="font-size:10.5px;color:var(--ink-soft);">Press Enter to start a new numbered point</span></label>'+
         '<textarea id="pf_notes" rows="5" placeholder="Type note then press Enter to add numbered points…" style="resize:vertical;" onkeydown="handleNotesEnter(event)">'+escapeHtml(p.notes||'')+'</textarea>'+
@@ -2215,6 +2240,7 @@ async function saveProfile(){
   p.duration = document.getElementById("pf_duration").value.trim();
   p.notes = document.getElementById("pf_notes").value.trim();
   p.initiationDate = document.getElementById("pf_initiationDate").value || "";
+  p.pendingFirstAppt = document.getElementById("pf_pendingFirstAppt").value || "";
   p.isActive = document.getElementById("pf_isActive").value === "true";
   p.ttrExcluded = document.getElementById("pf_ttrExcluded").value === "true";
   p.ttrExcludeReason = document.getElementById("pf_ttrExcludeReason").value.trim();
@@ -2651,6 +2677,13 @@ async function saveReview(){
     if(!visitsCache[currentPatientId]) visitsCache[currentPatientId]=[];
     visitsCache[currentPatientId].push(visit);
     invalidateTTRCache(currentPatientId);
+  }
+
+  // First real review saved — clear any pending "schedule before first review" flag
+  const patient = patients.find(x=>x.id===currentPatientId);
+  if(patient && patient.pendingFirstAppt){
+    patient.pendingFirstAppt = "";
+    await upsertPatientRow(patient, true);
   }
 
   await renderPatientList();
@@ -4153,6 +4186,13 @@ async function getScheduleCounts(){
     const {data} = await sb.from("defaulter_actions").select("new_tca").eq("action","Contacted — reschedule").not("new_tca","is",null);
     (data||[]).forEach(r=>{ if(r.new_tca) countByDate[r.new_tca]=(countByDate[r.new_tca]||0)+1; });
   }catch(e){}
+  // Also count patients scheduled for a first appointment before their first review
+  for(const p of patients){
+    if(p.isActive===false || !p.pendingFirstAppt) continue;
+    const visits = visitsCache[p.id]||[];
+    if(visits.some(v=>v.date)) continue; // already had a real review; pendingFirstAppt should have been cleared
+    countByDate[p.pendingFirstAppt] = (countByDate[p.pendingFirstAppt]||0)+1;
+  }
 
   return {sessionConfigs, countByDate};
 }
