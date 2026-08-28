@@ -2869,6 +2869,64 @@ async function editReview(visitId){
 }
 
 // ---------- TTR Overview ----------
+// ── TTR conclusion (used by TTR Overview page + CSV export) ──
+function dominantOutOfRangeFactor(visits, low, high){
+  const counts = {};
+  for(const v of visits){
+    const inr = parseFloat(v.inr);
+    if(isNaN(inr) || (inr>=low && inr<=high)) continue;
+    for(const f of (v.factors||[])){
+      if(f==="No significant factor detected") continue;
+      counts[f] = (counts[f]||0)+1;
+    }
+  }
+  const sorted = Object.entries(counts).sort((a,b)=>b[1]-a[1]);
+  return sorted.length ? sorted[0][0] : null;
+}
+function computeTTRConclusion(d){
+  if(d.p.isActive===false) return "Inactive — not currently followed at this clinic.";
+  if(d.p.ttrExcluded) return "Excluded from TTR average"+(d.p.ttrExcludeReason?" — "+d.p.ttrExcludeReason:" (no reason documented).");
+  if(d.ttr===null) return "Insufficient INR data to calculate TTR.";
+  let conclusion;
+  if(d.ttr>=70) conclusion = "Good anticoagulation control (TTR \u226570%).";
+  else if(d.ttr>=60) conclusion = "Acceptable control (TTR 60\u201369%) — continue routine monitoring.";
+  else{
+    const factor = d.visits ? dominantOutOfRangeFactor(d.visits, parseFloat(d.p.targetLow), parseFloat(d.p.targetHigh)) : null;
+    conclusion = "Poor control (TTR <60%)"+(factor?" — most out-of-range readings linked to "+factor.toLowerCase()+";":" —")+" consider dose/regime review.";
+  }
+  if(d.exclusionReasons && d.exclusionReasons.length) conclusion += " Meets criteria for possible TTR exclusion — review.";
+  return conclusion;
+}
+function csvEscape(v){
+  const s = String(v==null?"":v);
+  return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+}
+function exportTTRListCSV(){
+  if(currentUserRole!=="admin"){ showToast("Only admins can export this list.","error"); return; }
+  const data = window._ttrOverviewData;
+  if(!data || !data.length){ showToast("Nothing to export yet.","error"); return; }
+  const header = ["Name","MRN","Indication","Target INR low","Target INR high","Active","TTR %","Extended TTR %","Included in TTR average","Exclusion reason","Conclusion"];
+  const lines = [header.map(csvEscape).join(",")];
+  data.forEach(d=>{
+    lines.push([
+      d.p.name, d.p.mrn, d.p.indication||"", d.p.targetLow, d.p.targetHigh,
+      d.p.isActive!==false?"Active":"Inactive",
+      d.ttr===null?"":d.ttr.toFixed(1),
+      d.extTTR===null?"":d.extTTR.toFixed(1),
+      d.p.ttrExcluded?"Excluded":"Included",
+      d.p.ttrExcluded?(d.p.ttrExcludeReason||""):"",
+      computeTTRConclusion(d)
+    ].map(csvEscape).join(","));
+  });
+  const csv = lines.join("\n");
+  const blob = new Blob([csv], {type:"text/csv"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const dateStr = localDateStr(new Date());
+  a.href = url; a.download = "ttr_patient_list_"+dateStr+".csv"; a.click();
+  URL.revokeObjectURL(url);
+}
+
 async function renderTTROverview(){
   const main = document.getElementById("main");
   if(!configOk){ main.innerHTML = configWarningHtml(); return; }
@@ -2880,8 +2938,9 @@ async function renderTTROverview(){
     const ttr = calcTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
     const extTTR = calcExtendedTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
     const exclusionReasons = getTTRExclusionCriteria(p, visits);
-    ttrData.push({p, ttr, extTTR, exclusionReasons});
+    ttrData.push({p, ttr, extTTR, exclusionReasons, visits});
   }
+  window._ttrOverviewData = ttrData;
 
   const active = ttrData.filter(d => d.p.isActive !== false);
   const included = active.filter(d => !d.p.ttrExcluded && d.ttr !== null);
@@ -2935,7 +2994,9 @@ async function renderTTROverview(){
     </tr>`).join('');
 
   main.innerHTML =
-    '<div class="patient-header"><div><h1>TTR Overview</h1><div class="meta">Rosendaal linear interpolation · Extended TTR uses target ±0.2</div></div></div>'+
+    '<div class="patient-header"><div><h1>TTR Overview</h1><div class="meta">Rosendaal linear interpolation · Extended TTR uses target ±0.2</div></div>'+
+      (currentUserRole==="admin" ? '<button class="btn btn-primary" onclick="exportTTRListCSV()">⬇ Export list (CSV)</button>' : '')+
+    '</div>'+
     '<div class="ttr-overview-header">'+
       '<div class="ttr-avg-box '+pctClass+'"><div class="av-label">% TTR &ge;60%</div><div class="av-value">'+(pctTTR60===null?'—':pctTTR60.toFixed(1)+'%')+'</div><div style="font-size:11px; color:var(--ink-soft); margin-top:4px;">'+(included.length-below60)+' of '+included.length+' patients</div></div>'+
       '<div class="ttr-avg-box '+pctExtClass+'"><div class="av-label">% Ext. TTR &ge;60%</div><div class="av-value" style="font-size:26px;">'+(pctExtTTR60===null?'—':pctExtTTR60.toFixed(1)+'%')+'</div><div style="font-size:11px; color:var(--ink-soft); margin-top:4px;">'+(extIncluded.length-extBelow60)+' of '+extIncluded.length+' patients</div></div>'+
