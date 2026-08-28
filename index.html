@@ -112,6 +112,10 @@
   .dash-patient-name{font-size:13px; font-weight:600; color:var(--ink);}
   .dash-patient-meta{font-size:11px; color:var(--ink-soft);}
   .dash-appt-row{display:flex; align-items:center; justify-content:space-between; padding:9px 10px; border-radius:8px; border:1px solid var(--line); margin-bottom:5px; background:#FCFBF7;}
+  .dash-appt-row.full{background:#C0392B; border-color:#922B21; color:#fff;}
+  .dash-appt-row.full *{color:#fff!important;}
+  .dash-appt-row.warn{background:#F1C40F; border-color:#D4AC0D; color:#1a1a1a;}
+  .dash-appt-row.warn *{color:#1a1a1a!important;}
   .dash-appt-name{font-size:13px; font-weight:600; color:var(--ink); cursor:pointer;}
   .dash-appt-name:hover{color:var(--accent);}
   .dash-status-done{display:inline-flex; align-items:center; gap:4px; font-size:11.5px; font-weight:600; color:var(--good); background:var(--good-soft); padding:2px 8px; border-radius:20px;}
@@ -1905,14 +1909,13 @@ async function buildScheduleSummaryCard(){
     const count = countByDate[dateStr]||0;
     const max = cfg.maxPatients||30;
     const pct = count/max;
-    const dotColor = pct>=1?'#C0392B':pct>=0.9?'#F1C40F':'var(--good)';
+    const rowClass = pct>=1?'full':pct>=0.9?'warn':'';
     const noteTag = cfg.notes ? `<span class="tag" style="background:#FEF3E7;color:#7A4A0A;margin-left:6px;">${escapeHtml(cfg.notes)}</span>` : '';
-    return `<div class="dash-appt-row" style="cursor:pointer;" onclick="filterApptByDate('${dateStr}')">
+    return `<div class="dash-appt-row ${rowClass}" style="cursor:pointer;" onclick="filterApptByDate('${dateStr}')">
       <div>
         <div class="dash-appt-name">${displayDate}${noteTag}</div>
         <div class="dash-patient-meta">${count} / ${max} patients booked</div>
       </div>
-      <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:${dotColor};"></span>
     </div>`;
   }).join('');
 
