@@ -843,6 +843,18 @@ function localDateStr(d){
   const dd = String(d.getDate()).padStart(2,'0');
   return `${yyyy}-${mm}-${dd}`;
 }
+// Small "DD/MM/YYYY, HH:MM" formatter for "Last updated" style timestamps.
+function formatDateTimeShort(isoStr){
+  if(!isoStr) return '';
+  const d = new Date(isoStr);
+  if(isNaN(d.getTime())) return '';
+  const dd = String(d.getDate()).padStart(2,'0');
+  const mm = String(d.getMonth()+1).padStart(2,'0');
+  const yyyy = d.getFullYear();
+  const hh = String(d.getHours()).padStart(2,'0');
+  const min = String(d.getMinutes()).padStart(2,'0');
+  return `${dd}/${mm}/${yyyy}, ${hh}:${min}`;
+}
 
 // ── Navigation history (desktop) ──
 let navHistory = []; // stack of {view, patientId, tab}
@@ -1736,7 +1748,7 @@ async function buildApptCard(dateStr){
     const {data} = await sb.from("defaulter_actions")
       .select("*, patients(*)")
       .eq("new_tca", dateStr)
-      .eq("action","Contacted — reschedule");
+      .in("action",RESCHEDULE_ACTIONS);
     if(data){
       for(const row of data){
         const p = patients.find(x=>x.id===row.patient_id);
@@ -1806,7 +1818,7 @@ async function refreshApptCard(dateStr){
     const {data} = await sb.from("defaulter_actions")
       .select("*")
       .eq("new_tca", dateStr)
-      .eq("action","Contacted — reschedule");
+      .in("action",RESCHEDULE_ACTIONS);
     if(data){
       for(const row of data){
         const p = patients.find(x=>x.id===row.patient_id);
@@ -3135,30 +3147,30 @@ async function renderDefaultersView(){
 
   const ACTION_OPTIONS = [
     "",
-    "Attempted contact — no answer",
-    "Contacted — reschedule",
-    "Currently admission in ward",
-    "Discharged — transfer out",
-    "Discharged — switched to DOAC",
-    "Discharged — deceased",
-    "Lost to follow-up"
+    "Contacted — Reschedule",
+    "Unable to reach",
+    "Ward admission — Reschedule",
+    "Discharged",
+    "Refused further follow-up"
   ];
 
   function actionRow(d, key, extraBadge){
     const existing = actions[key]||{};
     const opts = ACTION_OPTIONS.map(o=>`<option value="${escapeHtml(o)}" ${(existing.action||'')==o?'selected':''}>${o||'— Select action —'}</option>`).join('');
-    const isReschedule = (existing.action||'')==="Contacted — reschedule";
+    const isReschedule = RESCHEDULE_ACTIONS.includes(existing.action||'');
     const newTcaField = `<div id="newTcaWrap_${escapeHtml(key)}" style="display:${isReschedule?'block':'none'}; margin-top:6px;">
       <label style="font-size:11px; color:var(--ink-soft); font-weight:600;">New TCA date</label>
       <input type="date" id="da_newtca_${escapeHtml(key)}" value="${escapeHtml(existing.new_tca||'')}" style="width:100%; padding:7px 8px; border-radius:7px; border:1px solid var(--line); font-size:12.5px; margin-top:3px;">
     </div>`;
     const newTcaBadge = existing.new_tca ? `<span class="status-badge sb-active" style="margin-left:4px;">New TCA: ${escapeHtml(existing.new_tca)}</span>` : '';
+    const lastUpdatedHtml = existing.updated_at ? `<div style="font-size:10.5px; color:var(--ink-soft); margin-top:2px;">Last updated: ${escapeHtml(formatDateTimeShort(existing.updated_at))}</div>` : '';
     return `<div class="defaulter-row">
       <div>
         <div style="font-weight:600; font-size:13.5px; cursor:pointer; color:var(--accent);" onclick="selectPatient('${d.patient.id}')">${escapeHtml(d.patient.name)}</div>
         <div style="font-size:11.5px; color:var(--ink-soft); font-family:var(--mono);">${escapeHtml(d.patient.mrn)}${d.patient.indication?' · '+escapeHtml(d.patient.indication):''}</div>
         <div style="font-size:11.5px; margin-top:3px;">Last visit: <b>${escapeHtml(d.lastVisitDate||'—')}</b> · Last INR: <b>${escapeHtml(String(d.lastINR||'—'))}</b></div>
         <div style="font-size:11.5px; margin-top:2px;">${extraBadge} ${newTcaBadge}</div>
+        ${lastUpdatedHtml}
       </div>
       <div>
         <select id="da_action_${escapeHtml(key)}" style="width:100%; padding:7px 8px; border-radius:7px; border:1px solid var(--line); font-size:12.5px; background:#FCFBF7;"
@@ -3225,6 +3237,7 @@ async function renderDefaultersView(){
         <div style="font-size:11.5px; color:var(--ink-soft); font-family:var(--mono);">${escapeHtml(pMrn)}</div>
         <div style="font-size:11.5px; margin-top:3px;">Was missed/pending as of: <b>${escapeHtml(r.missed_date||'—')}</b></div>
         ${currentStatusHtml}
+        ${r.updated_at ? `<div style="font-size:10.5px; color:var(--ink-soft); margin-top:2px;">Last updated: ${escapeHtml(formatDateTimeShort(r.updated_at))}</div>` : ''}
       </div>
       <div style="font-size:12.5px;">${escapeHtml(r.action||'—')}</div>
       <div style="font-size:12.5px; color:var(--ink-soft);">${escapeHtml(r.notes||'—')}${r.new_tca?'<br><span style="color:var(--ink);">New TCA was: '+escapeHtml(r.new_tca)+'</span>':''}</div>
@@ -3262,17 +3275,18 @@ async function renderDefaultersView(){
     '</div>';
 }
 
+const RESCHEDULE_ACTIONS = ["Contacted — Reschedule", "Ward admission — Reschedule"];
 function onDActionChange(key){
   const sel = document.getElementById("da_action_"+key);
   const wrap = document.getElementById("newTcaWrap_"+key);
-  if(wrap) wrap.style.display = sel?.value === "Contacted — reschedule" ? "block" : "none";
+  if(wrap) wrap.style.display = RESCHEDULE_ACTIONS.includes(sel?.value) ? "block" : "none";
 }
 
 async function saveDAction(patientId, missedDate, key){
   const action = document.getElementById("da_action_"+key)?.value||"";
   const notes = document.getElementById("da_notes_"+key)?.value||"";
   const newTca = document.getElementById("da_newtca_"+key)?.value||"";
-  if(action === "Contacted — reschedule" && !newTca){
+  if(RESCHEDULE_ACTIONS.includes(action) && !newTca){
     showToast("Please enter the new TCA date for rescheduled patient.","error",4000);
     return;
   }
@@ -4311,7 +4325,7 @@ async function getScheduleCounts(){
   }
   // Also count rescheduled defaulters
   try{
-    const {data} = await sb.from("defaulter_actions").select("new_tca").eq("action","Contacted — reschedule").not("new_tca","is",null);
+    const {data} = await sb.from("defaulter_actions").select("new_tca").in("action",RESCHEDULE_ACTIONS).not("new_tca","is",null);
     (data||[]).forEach(r=>{ if(r.new_tca) countByDate[r.new_tca]=(countByDate[r.new_tca]||0)+1; });
   }catch(e){}
   // Also count patients scheduled for a first appointment before their first review
