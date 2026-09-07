@@ -554,6 +554,22 @@
   </div>
 </div>
 
+<div class="modal-bg" id="externalInrModal">
+  <div class="modal">
+    <h3 id="extInrModalTitle">Add external INR reading</h3>
+    <p class="hint" style="margin:-4px 0 12px;">For an INR result from outside this clinic (e.g. another hospital or GP) that wasn't part of a full review here. It's included in TTR calculations, but won't affect appointments, dosing plans, or defaulter tracking.</p>
+    <input type="hidden" id="ei_edit_id" value="">
+    <div class="field" style="margin-bottom:10px;"><label>Date</label><input id="ei_date" type="date"></div>
+    <div class="field" style="margin-bottom:10px;"><label>INR result</label><input id="ei_inr" type="number" step="0.1" placeholder="e.g. 2.4"></div>
+    <div class="field" style="margin-bottom:6px;"><label>Note (optional)</label><input id="ei_note" placeholder="e.g. Checked at Hospital X"></div>
+    <div class="login-error" id="eiError"></div>
+    <div class="row-actions" style="margin-top:10px;">
+      <button class="btn" onclick="closeExternalInrModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveExternalInr()">Save</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-bg" id="fullNameModal">
   <div class="modal">
     <h3>Welcome — enter your full name</h3>
@@ -982,10 +998,10 @@ function patientToRow(p){
   return {id:p.id, name:p.name, mrn:p.mrn, phone:p.phone, indication:p.indication, target_low:p.targetLow, target_high:p.targetHigh, duration:p.duration, notes:p.notes||"", passover_notes:p.passoverNotes||"", initiation_date:p.initiationDate||null, is_active:p.isActive!==false, ttr_excluded:p.ttrExcluded||false, ttr_exclude_reason:p.ttrExcludeReason||"", medications:p.medications||[], pending_first_appt:p.pendingFirstAppt||null};
 }
 function rowToVisit(r){
-  return {id:r.id, date:r.date, twd:r.twd, inr:r.inr, factors:r.factors||[], factorNotes:r.factor_notes||{}, admitDate:r.admit_date||"", admitDx:r.admit_dx||"", admitInterrupted:r.admit_interrupted||false, planAction:r.plan_action, planDays:r.plan_days, planLoadMg:r.plan_load_mg, planSubAction:r.plan_sub_action||"", planSubPct:r.plan_sub_pct, newTwd:r.new_twd, nextAppt:r.next_appt||"", clinicalNote:r.clinical_note||"", planNotes:r.plan_notes||"", regimeLabel:r.regime_label||"", inrDayBefore:r.inr_day_before||false, longerTca:r.longer_tca||false, caseDiscussedDr:r.case_discussed_dr||false, doctorName:r.doctor_name||"", reviewer:r.reviewer||"", updatedAt:r.updated_at||null};
+  return {id:r.id, date:r.date, twd:r.twd, inr:r.inr, factors:r.factors||[], factorNotes:r.factor_notes||{}, admitDate:r.admit_date||"", admitDx:r.admit_dx||"", admitInterrupted:r.admit_interrupted||false, planAction:r.plan_action, planDays:r.plan_days, planLoadMg:r.plan_load_mg, planSubAction:r.plan_sub_action||"", planSubPct:r.plan_sub_pct, newTwd:r.new_twd, nextAppt:r.next_appt||"", clinicalNote:r.clinical_note||"", planNotes:r.plan_notes||"", regimeLabel:r.regime_label||"", inrDayBefore:r.inr_day_before||false, longerTca:r.longer_tca||false, caseDiscussedDr:r.case_discussed_dr||false, doctorName:r.doctor_name||"", reviewer:r.reviewer||"", isExternal:r.is_external||false, updatedAt:r.updated_at||null};
 }
 function visitToRow(v, patientId){
-  return {id:v.id, patient_id:patientId, date:v.date||null, twd:v.twd||null, inr:v.inr||null, factors:v.factors||[], factor_notes:v.factorNotes||{}, admit_date:v.admitDate||null, admit_dx:v.admitDx||null, admit_interrupted:v.admitInterrupted||false, plan_action:v.planAction||null, plan_days:v.planDays||null, plan_load_mg:v.planLoadMg||null, plan_sub_action:v.planSubAction||null, plan_sub_pct:v.planSubPct||null, new_twd:v.newTwd||null, next_appt:v.nextAppt||null, clinical_note:v.clinicalNote||null, plan_notes:v.planNotes||null, regime_label:v.regimeLabel||null, inr_day_before:v.inrDayBefore||false, longer_tca:v.longerTca||false, case_discussed_dr:v.caseDiscussedDr||false, doctor_name:v.doctorName||null, reviewer:v.reviewer||null};
+  return {id:v.id, patient_id:patientId, date:v.date||null, twd:v.twd||null, inr:v.inr||null, factors:v.factors||[], factor_notes:v.factorNotes||{}, admit_date:v.admitDate||null, admit_dx:v.admitDx||null, admit_interrupted:v.admitInterrupted||false, plan_action:v.planAction||null, plan_days:v.planDays||null, plan_load_mg:v.planLoadMg||null, plan_sub_action:v.planSubAction||null, plan_sub_pct:v.planSubPct||null, new_twd:v.newTwd||null, next_appt:v.nextAppt||null, clinical_note:v.clinicalNote||null, plan_notes:v.planNotes||null, regime_label:v.regimeLabel||null, inr_day_before:v.inrDayBefore||false, longer_tca:v.longerTca||false, case_discussed_dr:v.caseDiscussedDr||false, doctor_name:v.doctorName||null, reviewer:v.reviewer||null, is_external:v.isExternal||false};
   // Note: updated_at is managed by Postgres (default now()), not sent by client
 }
 
@@ -1274,7 +1290,9 @@ async function savePassoverNotes(){
 }
 function getPatientStatus(visits){
   const today = new Date(); today.setHours(0,0,0,0);
-  const sorted = [...visits].filter(v=>v.date).sort((a,b)=>new Date(b.date)-new Date(a.date));
+  // Exclude external/non-review INR-only entries — only a real clinical
+  // review sets a meaningful "next appointment" for status purposes.
+  const sorted = [...visits].filter(v=>v.date && !v.isExternal).sort((a,b)=>new Date(b.date)-new Date(a.date));
   if(!sorted.length) return {type:'no-visits', label:'No visits recorded'};
   const last = sorted[0];
   if(!last.nextAppt) return {type:'missing-appt', label: last.planAction==='refer_mopd'?'Refer MOPD — no TCA set':'No TCA set'};
@@ -1959,8 +1977,11 @@ function getTTRExclusionCriteria(p, visits){
   if(readingsPastYear < 3) reasons.push('Fewer than 3 INR readings in the past 12 months ('+readingsPastYear+' recorded)');
 
   // 2. Defaulted > 6 months (missed TCA more than 180 days ago, still outstanding)
-  if(sorted.length>0){
-    const last = sorted[sorted.length-1];
+  // Use the last CLINICAL visit here (excluding external/non-review INR entries),
+  // since only a real review sets a "next appointment" for this patient.
+  const clinicalSorted = sorted.filter(v=>!v.isExternal);
+  if(clinicalSorted.length>0){
+    const last = clinicalSorted[clinicalSorted.length-1];
     if(last.nextAppt){
       const appt = new Date(last.nextAppt); appt.setHours(0,0,0,0);
       const daysMissed = Math.floor((today-appt)/86400000);
@@ -2015,9 +2036,10 @@ function getSpecialFlags(p, visits){
   const recentAdmissions = visits.filter(v=>v.admitDate && new Date(v.admitDate)>=oneYearAgo);
   if(recentAdmissions.length >= 2) flags.push('≥2 ward admissions in the past 12 months ('+recentAdmissions.length+' recorded)');
 
-  // Defaulter > 6 months
-  if(sorted.length>0){
-    const last = sorted[sorted.length-1];
+  // Defaulter > 6 months — only a real clinical review sets a next appointment
+  const clinicalSorted = sorted.filter(v=>!v.isExternal);
+  if(clinicalSorted.length>0){
+    const last = clinicalSorted[clinicalSorted.length-1];
     if(last.nextAppt){
       const appt = new Date(last.nextAppt); appt.setHours(0,0,0,0);
       const daysMissed = Math.floor((today-appt)/86400000);
@@ -2025,9 +2047,10 @@ function getSpecialFlags(p, visits){
     }
   }
 
-  // No MTAC visit in current year (no review with date in current year)
-  const hasCurrentYearVisit = sorted.some(v=>v.date && new Date(v.date).getFullYear()===currentYear);
-  if(!hasCurrentYearVisit && sorted.length>0) flags.push('No MTAC visit in '+currentYear);
+  // No MTAC visit in current year (no CLINICAL review with date in current year —
+  // an external/non-review INR entry doesn't count as an MTAC visit)
+  const hasCurrentYearVisit = clinicalSorted.some(v=>v.date && new Date(v.date).getFullYear()===currentYear);
+  if(!hasCurrentYearVisit && clinicalSorted.length>0) flags.push('No MTAC visit in '+currentYear);
 
   // Initiation < 6 months — use patient initiationDate if set, else first visit date
   const initDateStr = p.initiationDate || (sorted.length>0?sorted[0].date:null);
@@ -2376,9 +2399,10 @@ function toggleRegimeInsightView(mode){
 // ---------- Review panel ----------
 async function renderReviewPanel(p){
   const el = document.getElementById("panelReview");
-  // Get last visit for auto-fill
+  // Get last CLINICAL visit for auto-fill (exclude external/non-review INR entries,
+  // which have no dose/regime info to prefill from).
   const visits = await loadVisits(p.id);
-  const lastVisit = [...visits].filter(v=>v.date).sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
+  const lastVisit = [...visits].filter(v=>v.date && !v.isExternal).sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
   const lastTwd = lastVisit?.newTwd || lastVisit?.twd || "";
   const lastRegime = lastVisit?.regimeLabel || "";
   const regimeInsightsHtml = buildRegimeInsightsHtml(p, visits);
@@ -2825,6 +2849,18 @@ function renderHistoryPanel(p, visits, ttr, extTTR){
       const inrNum = parseFloat(v.inr);
       const low = parseFloat(p.targetLow), high = parseFloat(p.targetHigh);
       const inRange = !isNaN(inrNum) && inrNum>=low && inrNum<=high;
+      if(v.isExternal){
+        rows += '<tr style="background:#FCFAF3;">'+
+          '<td>'+escapeHtml(v.date)+'<br>'+
+            '<button class="btn" style="padding:3px 9px; font-size:11px; margin-top:4px;" onclick="openExternalInrModal(\''+v.id+'\')">Edit</button> '+
+            '<button class="btn btn-danger" style="padding:3px 9px; font-size:11px; margin-top:4px;" onclick="deleteReview(\''+v.id+'\')">Del</button>'+
+          '</td>'+
+          '<td><span class="badge '+(inRange?'badge-good':'badge-bad')+'">'+(v.inr||'--')+'</span></td>'+
+          '<td colspan="4"><span class="tag" style="background:#EEF0EA; color:#5B6B4E;">External reading — not a clinic review</span>'+(v.clinicalNote?' <span style="font-size:11.5px; color:var(--ink-soft);">'+escapeHtml(v.clinicalNote)+'</span>':'')+'</td>'+
+          '<td style="font-size:11.5px; color:var(--ink-soft);">'+escapeHtml(v.reviewer||'—')+'</td>'+
+        '</tr>';
+        continue;
+      }
       const factorsHtml = (v.factors||[]).map(f => {
         const note = (v.factorNotes||{})[f];
         return '<span class="tag" title="'+escapeHtml(note||'')+'">'+escapeHtml(f)+(note?' — '+escapeHtml(note):'')+'</span>';
@@ -2845,7 +2881,71 @@ function renderHistoryPanel(p, visits, ttr, extTTR){
     }
   }
 
-  el.innerHTML = ttrSummary+'<div class="card"><h3>Review history</h3><div class="table-scroll"><table class="history"><thead><tr><th>Date</th><th>INR / TWD</th><th>Factors</th><th>Ward admission</th><th>Plan</th><th>Next appt</th><th>Reviewer</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+  el.innerHTML = ttrSummary+'<div class="card"><h3>Review history <button class="btn" style="float:right; font-size:11.5px; padding:5px 12px;" onclick="openExternalInrModal()">+ Add external INR</button></h3><div class="table-scroll"><table class="history"><thead><tr><th>Date</th><th>INR / TWD</th><th>Factors</th><th>Ward admission</th><th>Plan</th><th>Next appt</th><th>Reviewer</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+}
+
+// ── External (non-review) INR entries ──
+// For historical/outside INR results a reviewer wants counted toward TTR
+// without going through the full review form (which requires TWD, plan, etc).
+function openExternalInrModal(visitId){
+  document.getElementById("eiError").innerText = "";
+  document.getElementById("ei_edit_id").value = visitId || "";
+  if(visitId){
+    const v = (visitsCache[currentPatientId]||[]).find(x=>x.id===visitId);
+    document.getElementById("extInrModalTitle").innerText = "Edit external INR reading";
+    document.getElementById("ei_date").value = v?.date || "";
+    document.getElementById("ei_inr").value = v?.inr || "";
+    document.getElementById("ei_note").value = v?.clinicalNote || "";
+  } else {
+    document.getElementById("extInrModalTitle").innerText = "Add external INR reading";
+    document.getElementById("ei_date").value = "";
+    document.getElementById("ei_inr").value = "";
+    document.getElementById("ei_note").value = "";
+  }
+  document.getElementById("externalInrModal").classList.add("show");
+}
+function closeExternalInrModal(){
+  document.getElementById("externalInrModal").classList.remove("show");
+}
+async function saveExternalInr(){
+  const editId = document.getElementById("ei_edit_id").value;
+  const date = document.getElementById("ei_date").value;
+  const inr = document.getElementById("ei_inr").value;
+  const note = document.getElementById("ei_note").value.trim();
+  const errBox = document.getElementById("eiError");
+  errBox.innerText = "";
+  if(!date){ errBox.innerText = "Enter the date of the reading."; return; }
+  if(!inr || isNaN(parseFloat(inr))){ errBox.innerText = "Enter a valid INR value."; return; }
+
+  const visit = {
+    id: editId || ("v_"+Date.now()),
+    date, inr: parseFloat(inr),
+    isExternal: true,
+    factors: [], factorNotes: {},
+    clinicalNote: note,
+    twd:"", newTwd:"", planAction:"", planDays:"", planSubAction:"", planSubPct:"",
+    nextAppt:"", regimeLabel:"", inrDayBefore:false, longerTca:false,
+    caseDiscussedDr:false, doctorName:"", admitDate:"", admitDx:"", admitInterrupted:false,
+    reviewer: currentReviewerName || ""
+  };
+  try{
+    if(editId){
+      await upsertVisitRow(currentPatientId, visit);
+      const idx = (visitsCache[currentPatientId]||[]).findIndex(x=>x.id===editId);
+      if(idx>=0) visitsCache[currentPatientId][idx] = visit;
+    } else {
+      await insertVisitRow(currentPatientId, visit);
+      if(!visitsCache[currentPatientId]) visitsCache[currentPatientId]=[];
+      visitsCache[currentPatientId].push(visit);
+    }
+    invalidateTTRCache(currentPatientId);
+    closeExternalInrModal();
+    await renderPatientList();
+    await renderMain();
+    showTab("history");
+  }catch(e){
+    errBox.innerText = "Failed to save: "+e.message;
+  }
 }
 
 async function deleteReview(visitId){
@@ -2953,8 +3053,9 @@ function csvEscape(v){
 function exportTTRListCSV(){
   if(currentUserRole!=="admin"){ showToast("Only admins can export this list.","error"); return; }
   const data = window._ttrOverviewData;
+  const year = window._ttrOverviewYear || 'all';
   if(!data || !data.length){ showToast("Nothing to export yet.","error"); return; }
-  const header = ["Name","MRN","Indication","Target INR low","Target INR high","Active","TTR %","Extended TTR %","Included in TTR average","Exclusion reason","Conclusion"];
+  const header = ["Name","MRN","Indication","Target INR low","Target INR high","Active",(year==='all'?"TTR %":"TTR % ("+year+")"),(year==='all'?"Extended TTR %":"Extended TTR % ("+year+")"),"Included in TTR average","Exclusion reason","Conclusion"];
   const lines = [header.map(csvEscape).join(",")];
   data.forEach(d=>{
     lines.push([
@@ -2972,24 +3073,39 @@ function exportTTRListCSV(){
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   const dateStr = localDateStr(new Date());
-  a.href = url; a.download = "ttr_patient_list_"+dateStr+".csv"; a.click();
+  a.href = url; a.download = "ttr_patient_list_"+(year==='all'?'alltime':year)+"_"+dateStr+".csv"; a.click();
   URL.revokeObjectURL(url);
 }
 
-async function renderTTROverview(){
+async function renderTTROverview(year){
+  year = year || 'all';
   const main = document.getElementById("main");
   if(!configOk){ main.innerHTML = configWarningHtml(); return; }
 
   const allPatients = patients;
   const ttrData = [];
+  const yearsSeen = new Set();
   for(const p of allPatients){
     const visits = await loadVisits(p.id);
-    const ttr = calcTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
-    const extTTR = calcExtendedTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
+    const low = parseFloat(p.targetLow), high = parseFloat(p.targetHigh);
+    const byYear = calcTTRByYear(visits, low, high);
+    const byYearExt = calcTTRByYear(visits, low-0.2, high+0.2);
+    Object.keys(byYear).forEach(y=>yearsSeen.add(y));
+
+    let ttr, extTTR;
+    if(year === 'all'){
+      ttr = calcTTR(visits, low, high);
+      extTTR = calcExtendedTTR(visits, low, high);
+    } else {
+      ttr = (byYear[year] !== undefined) ? byYear[year] : null;
+      extTTR = (byYearExt[year] !== undefined) ? byYearExt[year] : null;
+    }
     const exclusionReasons = getTTRExclusionCriteria(p, visits);
-    ttrData.push({p, ttr, extTTR, exclusionReasons, visits});
+    ttrData.push({p, ttr, extTTR, exclusionReasons, visits, byYear});
   }
   window._ttrOverviewData = ttrData;
+  window._ttrOverviewYear = year;
+  const availableYears = [...yearsSeen].sort((a,b)=>b-a); // newest first
 
   const active = ttrData.filter(d => d.p.isActive !== false);
   const included = active.filter(d => !d.p.ttrExcluded && d.ttr !== null);
@@ -3043,8 +3159,14 @@ async function renderTTROverview(){
     </tr>`).join('');
 
   main.innerHTML =
-    '<div class="patient-header"><div><h1>TTR Overview</h1><div class="meta">Rosendaal linear interpolation · Extended TTR uses target ±0.2</div></div>'+
-      (currentUserRole==="admin" ? '<button class="btn btn-primary" onclick="exportTTRListCSV()">⬇ Export list (CSV)</button>' : '')+
+    '<div class="patient-header"><div><h1>TTR Overview</h1><div class="meta">Rosendaal linear interpolation · Extended TTR uses target ±0.2'+(year!=='all'?' · Showing calendar year '+year:' · Showing all-time TTR')+'</div></div>'+
+      '<div style="display:flex; gap:10px; align-items:center;">'+
+        '<select onchange="renderTTROverview(this.value)" style="border:1px solid var(--line); border-radius:8px; padding:8px 12px; font-size:13px; background:#FCFBF7;">'+
+          '<option value="all"'+(year==='all'?' selected':'')+'>All time</option>'+
+          availableYears.map(y=>'<option value="'+y+'"'+(year===y?' selected':'')+'>'+y+'</option>').join('')+
+        '</select>'+
+        (currentUserRole==="admin" ? '<button class="btn btn-primary" onclick="exportTTRListCSV()">⬇ Export list (CSV)</button>' : '')+
+      '</div>'+
     '</div>'+
     '<div class="ttr-overview-header">'+
       '<div class="ttr-avg-box '+pctClass+'"><div class="av-label">% TTR &ge;60%</div><div class="av-value">'+(pctTTR60===null?'—':pctTTR60.toFixed(1)+'%')+'</div><div style="font-size:11px; color:var(--ink-soft); margin-top:4px;">'+(included.length-below60)+' of '+included.length+' patients</div></div>'+
@@ -3082,13 +3204,13 @@ async function toggleActive(patientId){
   p.isActive = p.isActive === false ? true : false;
   await upsertPatientRow(p, true);
   await renderPatientList();
-  renderTTROverview();
+  renderTTROverview(window._ttrOverviewYear);
 }
 async function toggleTTRExclude(patientId){
   const p = patients.find(x => x.id === patientId);
   p.ttrExcluded = !p.ttrExcluded;
   await upsertPatientRow(p, true);
-  renderTTROverview();
+  renderTTROverview(window._ttrOverviewYear);
 }
 
 // ---------- Defaulter detection ----------
@@ -3099,7 +3221,9 @@ function getDefaulters(allPatients, visitsCache){
 
   for(const p of allPatients){
     if(p.isActive === false) continue;
-    const visits = (visitsCache[p.id]||[]).filter(v=>v.date);
+    // Exclude external/non-review INR entries — only a real clinical review
+    // sets a next appointment, so those shouldn't be treated as "the last visit".
+    const visits = (visitsCache[p.id]||[]).filter(v=>v.date && !v.isExternal);
     if(!visits.length) continue;
     const sorted = [...visits].sort((a,b)=>new Date(b.date)-new Date(a.date));
     const last = sorted[0];
@@ -3227,7 +3351,7 @@ async function renderDefaultersView(){
     let currentStatusHtml = '';
     if(p){
       const visits = visitsCache[p.id]||[];
-      const sorted = [...visits].filter(v=>v.date).sort((a,b)=>new Date(b.date)-new Date(a.date));
+      const sorted = [...visits].filter(v=>v.date && !v.isExternal).sort((a,b)=>new Date(b.date)-new Date(a.date));
       const last = sorted[0];
       if(last?.nextAppt) currentStatusHtml = `<div style="font-size:11.5px; color:var(--good); margin-top:2px;">Now scheduled: <b>${escapeHtml(last.nextAppt)}</b></div>`;
     }
@@ -3631,8 +3755,9 @@ async function generatePatientReport(patientId){
     else analysisLines.push(inCount+' of '+inrs.length+' INR readings ('+Math.round(inCount/inrs.length*100)+'%) were within the target range of '+low+'–'+high+'.');
   }
 
-  // Regime recommendation
-  const lastVisit=sortedDesc[0];
+  // Regime recommendation — use the last CLINICAL visit (excludes external/
+  // non-review INR entries, which carry no dose/regime info).
+  const lastVisit=sortedDesc.filter(v=>!v.isExternal)[0];
   const currentTwd=parseFloat(lastVisit?.newTwd||lastVisit?.twd||0);
   const rules=await getRules();
   const strengths=rules.tabletStrengths||DEFAULT_RULES.tabletStrengths;
@@ -3665,11 +3790,11 @@ async function generatePatientReport(patientId){
     const inrNum=parseFloat(v.inr);
     const inRange=!isNaN(inrNum)&&inrNum>=low&&inrNum<=high;
     return `<tr>
-      <td>${escapeHtml(v.date)}</td>
+      <td>${escapeHtml(v.date)}${v.isExternal?' <span class="badge" style="font-size:10px; background:#EEE; color:#666;">External</span>':''}</td>
       <td><span class="badge ${v.inr?(inRange?'good':'bad'):''}">${v.inr||'--'}</span></td>
       <td>${v.twd||'--'}mg</td>
-      <td>${(v.factors||[]).join(', ')||'—'}</td>
-      <td>${escapeHtml(v.planAction?PLAN_LABELS[v.planAction]||v.planAction:'—')}</td>
+      <td>${(v.factors||[]).join(', ')||(v.isExternal?'—':'—')}</td>
+      <td>${escapeHtml(v.planAction?PLAN_LABELS[v.planAction]||v.planAction:(v.isExternal?'External reading':'—'))}</td>
       <td>${v.newTwd||'--'}mg</td>
       <td>${v.regimeLabel||'—'}</td>
       <td>${v.nextAppt||'—'}</td>
