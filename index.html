@@ -1187,6 +1187,19 @@ function calcTTRByYear(visits, low, high){
   }
   return result;
 }
+// ── "Main" TTR number now reflects the CURRENT calendar year only (not
+// lifetime-cumulative). Uses the same year-splitting logic as calcTTRByYear,
+// just picks out this year's figure. calcTTR/calcExtendedTTR (all-time) are
+// kept for the explicit "All time" option on the TTR Overview page.
+function getCurrentYear(){ return new Date().getFullYear(); }
+function calcCurrentYearTTR(visits, low, high){
+  const byYear = calcTTRByYear(visits, low, high);
+  const yr = getCurrentYear();
+  return (byYear[yr] !== undefined) ? byYear[yr] : null;
+}
+function calcCurrentYearExtendedTTR(visits, low, high){
+  return calcCurrentYearTTR(visits, low - 0.2, high + 0.2);
+}
 
 // ---------- Rule-based dosing suggestion ----------
 // Rule 1: max change of daily dose is +/-1mg (i.e. max weekly TWD change of 7mg).
@@ -1335,7 +1348,7 @@ async function renderPatientList(){
     // Non-blocking: use setTimeout to yield to UI between each patient
     setTimeout(async()=>{
       const visits = await loadVisits(p.id);
-      const ttr = calcTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
+      const ttr = calcCurrentYearTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
       const status = getPatientStatus(visits);
       ttrCache[p.id] = {ttr, status};
       // Patch the row in-place without re-rendering the whole list
@@ -1580,7 +1593,7 @@ async function showAllPatients(q){
   for(const p of uncached){
     setTimeout(async()=>{
       const visits = await loadVisits(p.id);
-      const ttr = calcTTR(visits,parseFloat(p.targetLow),parseFloat(p.targetHigh));
+      const ttr = calcCurrentYearTTR(visits,parseFloat(p.targetLow),parseFloat(p.targetHigh));
       const status = getPatientStatus(visits);
       ttrCache[p.id]={ttr,status};
       // Re-render the specific row
@@ -1758,7 +1771,7 @@ async function buildApptCard(dateStr){
     const thisDateAppt = visits.filter(v=>v.nextAppt===dateStr);
     if(!thisDateAppt.length) continue;
     const hasVisitToday = visits.some(v=>v.date===dateStr);
-    const ttr = calcTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
+    const ttr = calcCurrentYearTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
     appts.push({p, reviewed:hasVisitToday, ttr, inrDayBefore:thisDateAppt[0].inrDayBefore||false, isRescheduled:false});
   }
   // 2. Rescheduled defaulters with new_tca matching this date
@@ -1774,7 +1787,7 @@ async function buildApptCard(dateStr){
         if(appts.find(a=>a.p.id===p.id)) continue; // already in list
         const visits = await loadVisits(p.id);
         const hasVisitToday = visits.some(v=>v.date===dateStr);
-        const ttr = calcTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
+        const ttr = calcCurrentYearTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
         appts.push({p, reviewed:hasVisitToday, ttr, inrDayBefore:false, isRescheduled:true});
       }
     }
@@ -1828,7 +1841,7 @@ async function refreshApptCard(dateStr){
     const thisDateAppt = visits.filter(v=>v.nextAppt===dateStr);
     if(!thisDateAppt.length) continue;
     const hasVisitToday = visits.some(v=>v.date===dateStr);
-    const ttr = calcTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
+    const ttr = calcCurrentYearTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
     appts.push({p, reviewed:hasVisitToday, ttr, inrDayBefore:thisDateAppt[0].inrDayBefore||false, isRescheduled:false});
   }
   // Rescheduled defaulters
@@ -1844,7 +1857,7 @@ async function refreshApptCard(dateStr){
         if(appts.find(a=>a.p.id===p.id)) continue;
         const visits = await loadVisits(p.id);
         const hasVisitToday = visits.some(v=>v.date===dateStr);
-        const ttr = calcTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
+        const ttr = calcCurrentYearTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
         appts.push({p, reviewed:hasVisitToday, ttr, inrDayBefore:false, isRescheduled:true});
       }
     }
@@ -1910,7 +1923,7 @@ function buildTTRSummaryCard(){
     </div>`).join('');
   return `<div class="dash-card">
     <div class="dash-card-header">
-      <div class="dash-card-title">TTR overview</div>
+      <div class="dash-card-title">TTR overview (${getCurrentYear()})</div>
       <div class="dash-card-icon" style="background:#EFF3FB;">📊</div>
     </div>
     <div class="dash-card-body">
@@ -2079,8 +2092,8 @@ async function renderMain(){
   const p = patients.find(x => x.id === currentPatientId);
   const visits = await loadVisits(currentPatientId);
   const low = parseFloat(p.targetLow), high = parseFloat(p.targetHigh);
-  const ttr = calcTTR(visits, low, high);
-  const extTTR = calcExtendedTTR(visits, low, high);
+  const ttr = calcCurrentYearTTR(visits, low, high);
+  const extTTR = calcCurrentYearExtendedTTR(visits, low, high);
   const lastVisit = visits.slice().filter(v=>v.date).sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
 
   // Status strip
@@ -2113,7 +2126,7 @@ async function renderMain(){
 
   let alertHtml = "";
   if(ttr !== null && ttr < 60){
-    alertHtml = '<div class="alert-banner"><span>&#9888;</span><div><b>Low TTR alert.</b> Time-in-therapeutic-range is '+ttr.toFixed(1)+'%, below the 60% quality threshold.</div></div>';
+    alertHtml = '<div class="alert-banner"><span>&#9888;</span><div><b>Low TTR alert.</b> Time-in-therapeutic-range for '+getCurrentYear()+' is '+ttr.toFixed(1)+'%, below the 60% quality threshold.</div></div>';
   }
 
   // Passover notes banner
@@ -2150,8 +2163,8 @@ async function renderMain(){
     '<div class="patient-header">'+
       '<div><h1>'+escapeHtml(p.name)+'</h1><div class="meta">MRN '+escapeHtml(p.mrn)+(p.indication?' &middot; '+escapeHtml(p.indication):'')+'</div></div>'+
       '<div class="header-stats">'+
-        '<div class="stat-box '+(ttr===null?'':(ttr<60?'alert':'ok'))+'"><div class="label">TTR</div><div class="value">'+(ttr===null?'--':ttr.toFixed(1)+'%')+'</div></div>'+
-        '<div class="stat-box hide-mobile" title="Extended TTR: target range expanded ±0.2"><div class="label">Ext. TTR ±0.2</div><div class="value" style="font-size:18px;">'+(extTTR===null?'--':extTTR.toFixed(1)+'%')+'</div></div>'+
+        '<div class="stat-box '+(ttr===null?'':(ttr<60?'alert':'ok'))+'" title="TTR for the current calendar year ('+getCurrentYear()+')"><div class="label">TTR ('+getCurrentYear()+')</div><div class="value">'+(ttr===null?'--':ttr.toFixed(1)+'%')+'</div></div>'+
+        '<div class="stat-box hide-mobile" title="Extended TTR for '+getCurrentYear()+': target range expanded ±0.2"><div class="label">Ext. TTR ±0.2</div><div class="value" style="font-size:18px;">'+(extTTR===null?'--':extTTR.toFixed(1)+'%')+'</div></div>'+
         '<div class="stat-box"><div class="label">Target INR</div><div class="value">'+(p.targetLow??'--')+'&ndash;'+(p.targetHigh??'--')+'</div></div>'+
         '<div class="stat-box"><div class="label">Last INR</div><div class="value">'+(lastVisit?lastVisit.inr:'--')+'</div></div>'+
       '</div>'+
@@ -2816,13 +2829,13 @@ function renderHistoryPanel(p, visits, ttr, extTTR){
 
   let ttrSummary = '<div class="card"><h3>Time in therapeutic range</h3>';
   if(ttr === null){
-    ttrSummary += '<div class="empty-state">Need at least two dated INR readings to calculate TTR (Rosendaal method).</div>';
+    ttrSummary += '<div class="empty-state">Need at least two dated INR readings in '+getCurrentYear()+' to calculate this year\'s TTR (Rosendaal method). See "TTR by calendar year" below for other years.</div>';
   } else {
     const cls = ttr<60 ? 'badge-bad' : 'badge-good';
     const extCls = (extTTR!==null && extTTR<60) ? 'badge-bad' : 'badge-good';
     ttrSummary += '<div style="display:flex; gap:24px; flex-wrap:wrap; margin-bottom:14px;">'+
-      '<div><div style="font-size:11px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:4px;">Overall TTR ('+p.targetLow+'–'+p.targetHigh+')</div><span class="badge '+cls+'" style="font-size:15px; padding:4px 12px;">'+ttr.toFixed(1)+'%</span></div>'+
-      (extTTR!==null?'<div><div style="font-size:11px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:4px;">Extended TTR ('+(parseFloat(p.targetLow)-0.2).toFixed(1)+'–'+(parseFloat(p.targetHigh)+0.2).toFixed(1)+')</div><span class="badge '+extCls+'" style="font-size:15px; padding:4px 12px;">'+extTTR.toFixed(1)+'%</span></div>':'')+
+      '<div><div style="font-size:11px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:4px;">TTR '+getCurrentYear()+' ('+p.targetLow+'–'+p.targetHigh+')</div><span class="badge '+cls+'" style="font-size:15px; padding:4px 12px;">'+ttr.toFixed(1)+'%</span></div>'+
+      (extTTR!==null?'<div><div style="font-size:11px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:4px;">Extended TTR '+getCurrentYear()+' ('+(parseFloat(p.targetLow)-0.2).toFixed(1)+'–'+(parseFloat(p.targetHigh)+0.2).toFixed(1)+')</div><span class="badge '+extCls+'" style="font-size:15px; padding:4px 12px;">'+extTTR.toFixed(1)+'%</span></div>':'')+
     '</div>';
     // TTR by year
     const byYear = calcTTRByYear(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
@@ -3078,7 +3091,7 @@ function exportTTRListCSV(){
 }
 
 async function renderTTROverview(year){
-  year = year || 'all';
+  year = year || String(getCurrentYear());
   const main = document.getElementById("main");
   if(!configOk){ main.innerHTML = configWarningHtml(); return; }
 
@@ -3585,7 +3598,7 @@ async function renderAnalysisView(){
   for(const p of patients){
     if(p.isActive===false || p.ttrExcluded) continue;
     const visits = await loadVisits(p.id);
-    const ttr = calcTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
+    const ttr = calcCurrentYearTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
     if(ttr!==null) ttrData.push({p, ttr, visits});
   }
 
@@ -3659,7 +3672,7 @@ async function renderAnalysisView(){
   ).join('');
 
   main.innerHTML =
-    '<div class="patient-header"><div><h1>TTR Analysis</h1><div class="meta">Active, included patients only · TTR &lt; 60% quality threshold</div></div></div>'+
+    '<div class="patient-header"><div><h1>TTR Analysis</h1><div class="meta">Active, included patients only · TTR &lt; 60% quality threshold · Current year ('+getCurrentYear()+')</div></div></div>'+
     '<div class="ttr-overview-header">'+
       '<div class="ttr-avg-box bad"><div class="av-label">Below 60%</div><div class="av-value">'+below60.length+'</div><div style="font-size:11px; color:var(--ink-soft); margin-top:4px;">'+(avgBelow!==null?'avg '+avgBelow.toFixed(1)+'%':'—')+'</div></div>'+
       '<div class="ttr-avg-box good"><div class="av-label">Above 60%</div><div class="av-value">'+above60.length+'</div><div style="font-size:11px; color:var(--ink-soft); margin-top:4px;">'+(avgAbove!==null?'avg '+avgAbove.toFixed(1)+'%':'—')+'</div></div>'+
@@ -3708,8 +3721,8 @@ async function generatePatientReport(patientId){
   if(!p){ alert("Select a patient first."); return; }
   const visits = await loadVisits(p.id);
   const low=parseFloat(p.targetLow), high=parseFloat(p.targetHigh);
-  const ttr=calcTTR(visits,low,high);
-  const extTTR=calcExtendedTTR(visits,low,high);
+  const ttr=calcCurrentYearTTR(visits,low,high);
+  const extTTR=calcCurrentYearExtendedTTR(visits,low,high);
   const byYear=calcTTRByYear(visits,low,high);
   const sorted=[...visits].filter(v=>v.date).sort((a,b)=>new Date(a.date)-new Date(b.date));
   const sortedDesc=[...sorted].reverse();
@@ -3808,10 +3821,10 @@ async function generatePatientReport(patientId){
     ${p.notes?'<div class="flag" style="margin-top:8px;"><b>Clinical notes:</b><br>'+escapeHtml(p.notes).replace(/\n/g,'<br>')+'</div>':''}
     ${p.passoverNotes?'<div class="flag" style="margin-top:8px; background:#FFFBEA; border-color:#E8C060; color:#5A3D00;"><b>📋 Passover notes:</b><br>'+escapeHtml(p.passoverNotes).replace(/\n/g,'<br>')+'</div>':''}
     ${(p.medications&&p.medications.length)?'<div class="flag" style="margin-top:8px;"><b>💊 Current medications:</b><br>'+p.medications.map(m=>escapeHtml(m.name)+' — '+(m.effect==='increase'?'Increases INR':m.effect==='probable_increase'?'Probably increases INR':m.effect==='decrease'?'Decreases INR':m.effect==='probable_decrease'?'Probably decreases INR':'No effect')).join('<br>')+'</div>':''}
-    <h2>TTR Summary</h2>
+    <h2>TTR Summary — ${getCurrentYear()}</h2>
     <table><tr>
-      <th>Overall TTR (${p.targetLow}–${p.targetHigh})</th>
-      <th>Extended TTR (${(low-0.2).toFixed(1)}–${(high+0.2).toFixed(1)})</th>
+      <th>TTR ${getCurrentYear()} (${p.targetLow}–${p.targetHigh})</th>
+      <th>Extended TTR ${getCurrentYear()} (${(low-0.2).toFixed(1)}–${(high+0.2).toFixed(1)})</th>
       <th>Total reviews</th><th>In range</th><th>Below</th><th>Above</th>
     </tr><tr>
       <td><span class="badge ${ttr===null?'warn':(ttr<60?'bad':'good')}">${ttr===null?'—':ttr.toFixed(1)+'%'}</span></td>
@@ -3835,8 +3848,8 @@ async function generateTTRReport(){
   for(const p of [...patients].sort((a,b)=>a.name.localeCompare(b.name))){
     if(p.isActive===false) continue;
     const visits=await loadVisits(p.id);
-    const ttr=calcTTR(visits,parseFloat(p.targetLow),parseFloat(p.targetHigh));
-    const extTTR=calcExtendedTTR(visits,parseFloat(p.targetLow),parseFloat(p.targetHigh));
+    const ttr=calcCurrentYearTTR(visits,parseFloat(p.targetLow),parseFloat(p.targetHigh));
+    const extTTR=calcCurrentYearExtendedTTR(visits,parseFloat(p.targetLow),parseFloat(p.targetHigh));
     const byYear=calcTTRByYear(visits,parseFloat(p.targetLow),parseFloat(p.targetHigh));
     const flags=getSpecialFlags(p,visits);
     const status=getPatientStatus(visits);
@@ -3976,10 +3989,10 @@ async function generateTTRReport(){
   const yrAvgRows=yrKeys.map(yr=>{const avg=yearAvgs[yr].sum/yearAvgs[yr].n;return`<tr><td>${yr}</td><td><span class="badge ${avg<60?'bad':'good'}">${avg.toFixed(1)}%</span></td><td>${yearAvgs[yr].n} patients</td></tr>`;}).join('');
 
   const html=`
-    <h1>Warfarin Clinic — TTR Analysis Report</h1>
-    <div class="meta">Generated: ${new Date().toLocaleDateString()} &nbsp;·&nbsp; Active patients: ${ttrData.length} &nbsp;·&nbsp; Included in average: ${included.length}</div>
+    <h1>Warfarin Clinic — TTR Analysis Report (${getCurrentYear()})</h1>
+    <div class="meta">Generated: ${new Date().toLocaleDateString()} &nbsp;·&nbsp; Active patients: ${ttrData.length} &nbsp;·&nbsp; Included in average: ${included.length} &nbsp;·&nbsp; TTR figures reflect calendar year ${getCurrentYear()} only</div>
 
-    <h2>1. Clinic Summary</h2>
+    <h2>1. Clinic Summary (${getCurrentYear()})</h2>
     <table><tr><th>Average TTR</th><th>Average Ext. TTR ±0.2</th><th>TTR ≥60% (achieved)</th><th>TTR &lt;60% (not achieved)</th><th>Insufficient data</th></tr>
     <tr>
       <td><span class="badge ${avgTTR===null?'warn':(avgTTR<60?'bad':'good')}">${avgTTR===null?'—':avgTTR.toFixed(1)+'%'}</span></td>
@@ -4023,7 +4036,7 @@ async function generateAppointmentList(){
   for(const p of patients){
     if(p.isActive===false) continue;
     const visits=await loadVisits(p.id);
-    const ttr=calcTTR(visits,parseFloat(p.targetLow),parseFloat(p.targetHigh));
+    const ttr=calcCurrentYearTTR(visits,parseFloat(p.targetLow),parseFloat(p.targetHigh));
     // Include every appointment ever set (not just the patient's single latest
     // one) so a patient who has already been seen stays on the list for that
     // date, tagged as Done, instead of disappearing once a new future TCA
@@ -4279,7 +4292,7 @@ async function exportAppointmentExcel(){
   for(const p of patients){
     if(p.isActive===false) continue;
     const visits = await loadVisits(p.id);
-    const ttr = calcTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
+    const ttr = calcCurrentYearTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
     const sorted = [...visits].filter(v=>v.date&&v.nextAppt).sort((a,b)=>new Date(b.date)-new Date(a.date));
     if(!sorted.length) continue;
     const last = sorted[0];
