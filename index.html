@@ -992,10 +992,10 @@ async function fetchAuditLog(recordId){
   }catch(e){ return []; }
 }
 function rowToPatient(r){
-  return {id:r.id, name:r.name, mrn:r.mrn, phone:r.phone||"", indication:r.indication||"", targetLow:r.target_low, targetHigh:r.target_high, duration:r.duration||"", notes:r.notes||"", passoverNotes:r.passover_notes||"", initiationDate:r.initiation_date||"", isActive:r.is_active!==false, ttrExcluded:r.ttr_excluded||false, ttrExcludeReason:r.ttr_exclude_reason||"", medications:r.medications||[], pendingFirstAppt:r.pending_first_appt||""};
+  return {id:r.id, name:r.name, mrn:r.mrn, phone:r.phone||"", indication:r.indication||"", targetLow:r.target_low, targetHigh:r.target_high, duration:r.duration||"", notes:r.notes||"", passoverNotes:r.passover_notes||"", initiationDate:r.initiation_date||"", isActive:r.is_active!==false, ttrExcluded:r.ttr_excluded||false, ttrExcludeReason:r.ttr_exclude_reason||"", medications:r.medications||[], pendingFirstAppt:r.pending_first_appt||"", crcl:r.crcl!=null?r.crcl:null, crclDate:r.crcl_date||""};
 }
 function patientToRow(p){
-  return {id:p.id, name:p.name, mrn:p.mrn, phone:p.phone, indication:p.indication, target_low:p.targetLow, target_high:p.targetHigh, duration:p.duration, notes:p.notes||"", passover_notes:p.passoverNotes||"", initiation_date:p.initiationDate||null, is_active:p.isActive!==false, ttr_excluded:p.ttrExcluded||false, ttr_exclude_reason:p.ttrExcludeReason||"", medications:p.medications||[], pending_first_appt:p.pendingFirstAppt||null};
+  return {id:p.id, name:p.name, mrn:p.mrn, phone:p.phone, indication:p.indication, target_low:p.targetLow, target_high:p.targetHigh, duration:p.duration, notes:p.notes||"", passover_notes:p.passoverNotes||"", initiation_date:p.initiationDate||null, is_active:p.isActive!==false, ttr_excluded:p.ttrExcluded||false, ttr_exclude_reason:p.ttrExcludeReason||"", medications:p.medications||[], pending_first_appt:p.pendingFirstAppt||null, crcl:p.crcl!=null?p.crcl:null, crcl_date:p.crclDate||null};
 }
 function rowToVisit(r){
   return {id:r.id, date:r.date, twd:r.twd, inr:r.inr, factors:r.factors||[], factorNotes:r.factor_notes||{}, admitDate:r.admit_date||"", admitDx:r.admit_dx||"", admitInterrupted:r.admit_interrupted||false, planAction:r.plan_action, planDays:r.plan_days, planLoadMg:r.plan_load_mg, planSubAction:r.plan_sub_action||"", planSubPct:r.plan_sub_pct, newTwd:r.new_twd, nextAppt:r.next_appt||"", clinicalNote:r.clinical_note||"", planNotes:r.plan_notes||"", regimeLabel:r.regime_label||"", inrDayBefore:r.inr_day_before||false, longerTca:r.longer_tca||false, caseDiscussedDr:r.case_discussed_dr||false, doctorName:r.doctor_name||"", reviewer:r.reviewer||"", isExternal:r.is_external||false, updatedAt:r.updated_at||null};
@@ -1978,6 +1978,32 @@ async function buildScheduleSummaryCard(){
 // A patient is flagged as a candidate for TTR exclusion if ANY of the
 // following hold. This does NOT auto-exclude — it surfaces an alert so a
 // reviewer can confirm and toggle "Excluded" (with a reason) manually.
+// ── DOAC switch screening (non-valvular AF + renal function) ──
+// This is a screening AID only, based purely on diagnosis text + creatinine
+// clearance, per the clinic's stated rule (Rivaroxaban 15mg OD for CrCl
+// 15–50 mL/min, 20mg OD for CrCl >50 mL/min, non-valvular AF only). It does
+// NOT account for bleeding risk, drug interactions, adherence, cost, or
+// patient preference — final decision always rests with the prescriber.
+function getDOACSuitability(p){
+  const indication = (p.indication||'').toLowerCase();
+  const isAF = /\bafib\b|\batrial fibrillation\b|\baf\b/.test(indication);
+  const isValvular = /valvular|valve|mitral stenosis|prosthetic|mechanical/.test(indication);
+  if(!isAF || isValvular) return {status:'not-applicable'};
+
+  if(p.crcl===null || p.crcl===undefined || p.crcl===''){
+    return {status:'needs-crcl', reason:'Non-valvular AF, but no creatinine clearance on record.'};
+  }
+  const crcl = parseFloat(p.crcl);
+  if(isNaN(crcl)) return {status:'needs-crcl', reason:'Non-valvular AF, but CrCl value is invalid.'};
+  if(crcl < 15){
+    return {status:'not-suitable', reason:'CrCl <15 mL/min — DOACs are generally not suitable at this renal function; refer for specialist/renal review.', crcl};
+  }
+  if(crcl <= 50){
+    return {status:'suitable', dose:'Tab. Rivaroxaban 15mg OD', band:'CrCl 15–50 mL/min', crcl};
+  }
+  return {status:'suitable', dose:'Tab. Rivaroxaban 20mg OD', band:'CrCl >50 mL/min', crcl};
+}
+
 function getTTRExclusionCriteria(p, visits){
   const reasons = [];
   const today = new Date(); today.setHours(0,0,0,0);
@@ -2218,6 +2244,8 @@ function renderProfilePanel(p){
       field('Warfarin initiation date','pf_initiationDate',p.initiationDate||'','date')+
       field('Pending first appointment (before 1st review)','pf_pendingFirstAppt',p.pendingFirstAppt||'','date')+
       '<div class="field"><label>Duration of therapy</label><input id="pf_duration" value="'+escapeHtml(p.duration)+'" placeholder="e.g. 6 months, lifelong"></div>'+
+      field('Creatinine clearance (mL/min)','pf_crcl',p.crcl||'','number','0.1')+
+      field('CrCl last checked','pf_crclDate',p.crclDate||'','date')+
       '<div class="field span2"><label>Clinical notes <span style="font-size:10.5px;color:var(--ink-soft);">Press Enter to start a new numbered point</span></label>'+
         '<textarea id="pf_notes" rows="5" placeholder="Type note then press Enter to add numbered points…" style="resize:vertical;" onkeydown="handleNotesEnter(event)">'+escapeHtml(p.notes||'')+'</textarea>'+
       '</div>'+
@@ -2323,6 +2351,8 @@ async function saveProfile(){
   p.notes = document.getElementById("pf_notes").value.trim();
   p.initiationDate = document.getElementById("pf_initiationDate").value || "";
   p.pendingFirstAppt = document.getElementById("pf_pendingFirstAppt").value || "";
+  p.crcl = document.getElementById("pf_crcl").value ? parseFloat(document.getElementById("pf_crcl").value) : null;
+  p.crclDate = document.getElementById("pf_crclDate").value || "";
   p.isActive = document.getElementById("pf_isActive").value === "true";
   p.ttrExcluded = document.getElementById("pf_ttrExcluded").value === "true";
   p.ttrExcludeReason = document.getElementById("pf_ttrExcludeReason").value.trim();
@@ -3671,6 +3701,24 @@ async function renderAnalysisView(){
     '</tr>'
   ).join('');
 
+  // ── DOAC switch screening ──
+  const doacData = patients.filter(p=>p.isActive!==false).map(p=>({p, result:getDOACSuitability(p)}));
+  const doacSuitable = doacData.filter(d=>d.result.status==='suitable');
+  const doac15 = doacSuitable.filter(d=>d.result.dose.includes('15mg'));
+  const doac20 = doacSuitable.filter(d=>d.result.dose.includes('20mg'));
+  const doacNeedsCrcl = doacData.filter(d=>d.result.status==='needs-crcl');
+  const doacNotSuitable = doacData.filter(d=>d.result.status==='not-suitable');
+
+  function doacRow(d, showDose){
+    return '<tr>'+
+      '<td style="cursor:pointer; color:var(--accent); font-weight:600;" onclick="selectPatient(\''+d.p.id+'\')">'+escapeHtml(d.p.name)+'</td>'+
+      '<td style="font-family:var(--mono); font-size:12px;">'+escapeHtml(d.p.mrn)+'</td>'+
+      '<td style="font-size:12px;">'+escapeHtml(d.p.indication||'—')+'</td>'+
+      '<td style="font-size:12px;">'+(d.result.crcl!=null?d.result.crcl+' mL/min':'—')+(d.p.crclDate?' <span style="color:var(--ink-soft);">('+escapeHtml(d.p.crclDate)+')</span>':'')+'</td>'+
+      (showDose?'<td><span class="badge badge-good">'+escapeHtml(d.result.dose)+'</span></td>':'<td style="font-size:12px; color:var(--ink-soft);">'+escapeHtml(d.result.reason||'—')+'</td>')+
+    '</tr>';
+  }
+
   main.innerHTML =
     '<div class="patient-header"><div><h1>TTR Analysis</h1><div class="meta">Active, included patients only · TTR &lt; 60% quality threshold · Current year ('+getCurrentYear()+')</div></div></div>'+
     '<div class="ttr-overview-header">'+
@@ -3685,6 +3733,20 @@ async function renderAnalysisView(){
     '<div class="card"><h3>Below-60% patient list</h3>'+
     (below60.length===0?'<div class="empty-state">No patients below 60% TTR — good control!</div>':
       '<table class="ttr-table"><thead><tr><th>Patient</th><th>MRN</th><th>Indication</th><th>TTR</th><th>Reviews</th></tr></thead><tbody>'+patientRows+'</tbody></table>')+
+    '</div>'+
+    '<div class="card" style="border-color:#C9DCE8;">'+
+      '<h3 style="color:#2C5A8C;">💊 DOAC switch screening — non-valvular AF</h3>'+
+      '<div class="flag" style="background:#EDF3FB; border-color:#B7CFE5; color:#2C5A8C; margin-bottom:14px;">'+
+        'Screening aid only, based on diagnosis text + creatinine clearance: non-valvular AF with CrCl 15–50 mL/min → <b>Tab. Rivaroxaban 15mg OD</b>; CrCl &gt;50 mL/min → <b>Tab. Rivaroxaban 20mg OD</b>. '+
+        'It does NOT account for bleeding risk, drug interactions, adherence, cost, or patient preference — confirm suitability with the prescribing clinician before switching any patient.'+
+      '</div>'+
+      (doacSuitable.length===0 && doacNeedsCrcl.length===0 && doacNotSuitable.length===0 ?
+        '<div class="empty-state">No active patients currently flagged — this looks at the Indication field for "AF"/"atrial fibrillation" (excluding valvular/mechanical valve) and the Creatinine clearance field in Profile.</div>' :
+        (doac20.length ? '<h4 style="font-size:12.5px; margin:10px 0 6px;">Suitable — Rivaroxaban 20mg OD ('+doac20.length+')</h4><table class="ttr-table"><thead><tr><th>Patient</th><th>MRN</th><th>Indication</th><th>CrCl</th><th>Suggested dose</th></tr></thead><tbody>'+doac20.map(d=>doacRow(d,true)).join('')+'</tbody></table>' : '')+
+        (doac15.length ? '<h4 style="font-size:12.5px; margin:14px 0 6px;">Suitable — Rivaroxaban 15mg OD ('+doac15.length+')</h4><table class="ttr-table"><thead><tr><th>Patient</th><th>MRN</th><th>Indication</th><th>CrCl</th><th>Suggested dose</th></tr></thead><tbody>'+doac15.map(d=>doacRow(d,true)).join('')+'</tbody></table>' : '')+
+        (doacNeedsCrcl.length ? '<h4 style="font-size:12.5px; margin:14px 0 6px; color:var(--warn);">Non-valvular AF — needs CrCl checked ('+doacNeedsCrcl.length+')</h4><table class="ttr-table"><thead><tr><th>Patient</th><th>MRN</th><th>Indication</th><th>CrCl</th><th>Note</th></tr></thead><tbody>'+doacNeedsCrcl.map(d=>doacRow(d,false)).join('')+'</tbody></table>' : '')+
+        (doacNotSuitable.length ? '<h4 style="font-size:12.5px; margin:14px 0 6px; color:var(--accent);">Not suitable — renal function ('+doacNotSuitable.length+')</h4><table class="ttr-table"><thead><tr><th>Patient</th><th>MRN</th><th>Indication</th><th>CrCl</th><th>Note</th></tr></thead><tbody>'+doacNotSuitable.map(d=>doacRow(d,false)).join('')+'</tbody></table>' : '')
+      )+
     '</div>';
 }
 
