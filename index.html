@@ -3178,6 +3178,9 @@ async function renderTTROverview(year){
   const pctClass = pctTTR60 === null ? '' : (pctTTR60 < 60 ? 'bad' : 'good');
   const pctExtClass = pctExtTTR60 === null ? '' : (pctExtTTR60 < 60 ? 'bad' : 'good');
 
+  const avgTTR = included.length > 0 ? included.reduce((s,d)=>s+d.ttr, 0) / included.length : null;
+  const avgClass = avgTTR === null ? '' : (avgTTR < 60 ? 'bad' : 'good');
+
   function ttrBadge(ttr){
     if(ttr===null) return '<span class="badge" style="background:#EFEAE0; color:#6B7A8C;">—</span>';
     return '<span class="badge '+(ttr<60?'badge-bad':'badge-good')+'">'+ttr.toFixed(1)+'%</span>';
@@ -3224,6 +3227,7 @@ async function renderTTROverview(year){
       '</div>'+
     '</div>'+
     '<div class="ttr-overview-header">'+
+      '<div class="ttr-avg-box '+avgClass+'"><div class="av-label">Average TTR</div><div class="av-value">'+(avgTTR===null?'—':avgTTR.toFixed(1)+'%')+'</div><div style="font-size:11px; color:var(--ink-soft); margin-top:4px;">'+included.length+' patients included</div></div>'+
       '<div class="ttr-avg-box '+pctClass+'"><div class="av-label">% TTR &ge;60%</div><div class="av-value">'+(pctTTR60===null?'—':pctTTR60.toFixed(1)+'%')+'</div><div style="font-size:11px; color:var(--ink-soft); margin-top:4px;">'+(included.length-below60)+' of '+included.length+' patients</div></div>'+
       '<div class="ttr-avg-box '+pctExtClass+'"><div class="av-label">% Ext. TTR &ge;60%</div><div class="av-value" style="font-size:26px;">'+(pctExtTTR60===null?'—':pctExtTTR60.toFixed(1)+'%')+'</div><div style="font-size:11px; color:var(--ink-soft); margin-top:4px;">'+(extIncluded.length-extBelow60)+' of '+extIncluded.length+' patients</div></div>'+
       '<div style="display:flex; flex-direction:column; gap:8px; justify-content:center;">'+
