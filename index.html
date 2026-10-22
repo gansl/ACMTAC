@@ -570,6 +570,27 @@
   </div>
 </div>
 
+<div class="modal-bg" id="targetChangeModal">
+  <div class="modal">
+    <h3>Target INR range changed</h3>
+    <p id="tc_summary" style="font-size:13px; margin:0 0 12px;"></p>
+    <label style="display:flex; gap:8px; align-items:flex-start; font-size:13px; cursor:pointer; margin-bottom:6px;">
+      <input type="radio" name="tc_mode" value="from" checked style="margin-top:3px;" onchange="onTargetChangeMode()">
+      <span><b>The target changed clinically.</b> The new range applies from the date below; earlier readings keep being judged against the old range, so past TTR stays accurate.</span>
+    </label>
+    <div class="field" id="tc_date_wrap" style="margin:0 0 12px 24px;"><label>New range effective from</label><input id="tc_date" type="date"></div>
+    <label style="display:flex; gap:8px; align-items:flex-start; font-size:13px; cursor:pointer; margin-bottom:6px;">
+      <input type="radio" name="tc_mode" value="correct" style="margin-top:3px;" onchange="onTargetChangeMode()">
+      <span><b>The old range was entered by mistake.</b> Apply the new range to the whole history (clears any earlier range changes).</span>
+    </label>
+    <div class="login-error" id="tcError"></div>
+    <div class="row-actions" style="margin-top:12px;">
+      <button class="btn" onclick="resolveTargetChange(null)">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmTargetChange()">Confirm</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-bg" id="rescheduleModal">
   <div class="modal">
     <h3>Reschedule appointment</h3>
@@ -1016,10 +1037,10 @@ async function fetchAuditLog(recordId){
   }catch(e){ return []; }
 }
 function rowToPatient(r){
-  return {id:r.id, name:r.name, mrn:r.mrn, phone:r.phone||"", indication:r.indication||"", targetLow:r.target_low, targetHigh:r.target_high, duration:r.duration||"", notes:r.notes||"", passoverNotes:r.passover_notes||"", initiationDate:r.initiation_date||"", isActive:r.is_active!==false, ttrExcluded:r.ttr_excluded||false, ttrExcludeReason:r.ttr_exclude_reason||"", medications:r.medications||[], pendingFirstAppt:r.pending_first_appt||"", crcl:r.crcl!=null?r.crcl:null, crclDate:r.crcl_date||"", mitralValveDisease:r.mitral_valve_disease||false, doacSwitchNotes:r.doac_switch_notes||""};
+  return {id:r.id, name:r.name, mrn:r.mrn, phone:r.phone||"", indication:r.indication||"", targetLow:r.target_low, targetHigh:r.target_high, duration:r.duration||"", notes:r.notes||"", passoverNotes:r.passover_notes||"", initiationDate:r.initiation_date||"", isActive:r.is_active!==false, ttrExcluded:r.ttr_excluded||false, ttrExcludeReason:r.ttr_exclude_reason||"", medications:r.medications||[], pendingFirstAppt:r.pending_first_appt||"", crcl:r.crcl!=null?r.crcl:null, crclDate:r.crcl_date||"", mitralValveDisease:r.mitral_valve_disease||false, doacSwitchNotes:r.doac_switch_notes||"", targetHistory:Array.isArray(r.target_history)?r.target_history:[]};
 }
 function patientToRow(p){
-  return {id:p.id, name:p.name, mrn:p.mrn, phone:p.phone, indication:p.indication, target_low:p.targetLow, target_high:p.targetHigh, duration:p.duration, notes:p.notes||"", passover_notes:p.passoverNotes||"", initiation_date:p.initiationDate||null, is_active:p.isActive!==false, ttr_excluded:p.ttrExcluded||false, ttr_exclude_reason:p.ttrExcludeReason||"", medications:p.medications||[], pending_first_appt:p.pendingFirstAppt||null, crcl:p.crcl!=null?p.crcl:null, crcl_date:p.crclDate||null, mitral_valve_disease:p.mitralValveDisease||false, doac_switch_notes:p.doacSwitchNotes||null};
+  return {id:p.id, name:p.name, mrn:p.mrn, phone:p.phone, indication:p.indication, target_low:p.targetLow, target_high:p.targetHigh, duration:p.duration, notes:p.notes||"", passover_notes:p.passoverNotes||"", initiation_date:p.initiationDate||null, is_active:p.isActive!==false, ttr_excluded:p.ttrExcluded||false, ttr_exclude_reason:p.ttrExcludeReason||"", medications:p.medications||[], pending_first_appt:p.pendingFirstAppt||null, crcl:p.crcl!=null?p.crcl:null, crcl_date:p.crclDate||null, mitral_valve_disease:p.mitralValveDisease||false, doac_switch_notes:p.doacSwitchNotes||null, target_history:(p.targetHistory&&p.targetHistory.length)?p.targetHistory:null};
 }
 function rowToVisit(r){
   return {id:r.id, date:r.date, twd:r.twd, inr:r.inr, factors:r.factors||[], factorNotes:r.factor_notes||{}, admitDate:r.admit_date||"", admitDx:r.admit_dx||"", admitInterrupted:r.admit_interrupted||false, planAction:r.plan_action, planDays:r.plan_days, planLoadMg:r.plan_load_mg, planSubAction:r.plan_sub_action||"", planSubPct:r.plan_sub_pct, newTwd:r.new_twd, nextAppt:r.next_appt||"", clinicalNote:r.clinical_note||"", planNotes:r.plan_notes||"", regimeLabel:r.regime_label||"", inrDayBefore:r.inr_day_before||false, longerTca:r.longer_tca||false, caseDiscussedDr:r.case_discussed_dr||false, doctorName:r.doctor_name||"", reviewer:r.reviewer||"", isExternal:r.is_external||false, updatedAt:r.updated_at||null};
@@ -1161,68 +1182,97 @@ function inRangeDuration(inr1, inr2, days, low, high){
   let hi = Math.min(Math.max(tLow,tHigh), days);
   return hi < lo ? 0 : hi - lo;
 }
-function calcTTR(visits, low, high){
+// ── Target range history ──
+// A patient's target INR range can change during treatment. targetHistory is a
+// list of {from:'YYYY-MM-DD', low, high} sorted by date; each entry applies from
+// its date onward. With no history, the patient's current range applies to all dates.
+function rangeAt(ms, low, high, history, widen){
+  widen = widen || 0;
+  let l = low, h = high;
+  if(history && history.length){
+    let chosen = null;
+    for(const e of history){ if(new Date(e.from).getTime() <= ms) chosen = e; else break; }
+    if(!chosen) chosen = history[0];
+    l = chosen.low; h = chosen.high;
+  }
+  return {low: l - widen, high: h + widen};
+}
+function targetHistoryText(p){
+  const h = p.targetHistory||[];
+  if(h.length < 2) return '';
+  return ' (changed: ' + h.map(e=>(e.from==='1900-01-01'?'start':e.from)+' → '+e.low+'–'+e.high).join('; ') + ')';
+}
+function getTargetRangeOn(p, dateStr){
+  const r = rangeAt(new Date(dateStr).getTime(), parseFloat(p.targetLow), parseFloat(p.targetHigh), p.targetHistory, 0);
+  return {low: r.low, high: r.high};
+}
+function _ttrCutPoints(d1, d2, history){
+  const pts = [];
+  if(history && history.length > 1){
+    for(const e of history){ const t = new Date(e.from); if(t > d1 && t < d2) pts.push(t); }
+  }
+  for(let y = d1.getFullYear()+1; ; y++){
+    const t = new Date(y,0,1);
+    if(t >= d2) break;
+    if(t > d1) pts.push(t);
+  }
+  pts.sort((a,b)=>a-b);
+  return pts;
+}
+// Rosendaal accumulation, applying the range in effect for each segment of each interval.
+function _ttrAccumulate(visits, low, high, history, widen){
   const dated = visits.filter(v => v.date && v.inr !== "" && v.inr !== null && !isNaN(v.inr))
     .map(v => ({date:new Date(v.date), inr:parseFloat(v.inr)})).sort((a,b)=>a.date-b.date);
-  if(dated.length < 2) return null;
-  let totalDays=0, inRangeDays=0;
+  const out = {total:{totalDays:0, inRangeDays:0}, years:{}, n:dated.length};
+  if(dated.length < 2) return out;
   for(let i=1;i<dated.length;i++){
-    const days = (dated[i].date - dated[i-1].date) / 86400000;
-    if(days<=0) continue;
-    totalDays += days;
-    inRangeDays += inRangeDuration(dated[i-1].inr, dated[i].inr, days, low, high);
-  }
-  return totalDays === 0 ? null : (inRangeDays/totalDays)*100;
-}
-function calcExtendedTTR(visits, low, high){
-  return calcTTR(visits, low - 0.2, high + 0.2);
-}
-function calcTTRByYear(visits, low, high){
-  const dated = visits.filter(v=>v.date&&v.inr!==null&&v.inr!==""&&!isNaN(v.inr))
-    .map(v=>({date:new Date(v.date),inr:parseFloat(v.inr)}))
-    .sort((a,b)=>a.date-b.date);
-  if(dated.length<2) return {};
-  const years = {};
-  for(let i=1;i<dated.length;i++){
-    const d1=dated[i-1].date, d2=dated[i].date;
-    const days=(d2-d1)/86400000;
-    if(days<=0) continue;
-    // Split interval across year boundaries
-    let cur=new Date(d1);
-    while(cur<d2){
-      const yr=cur.getFullYear();
-      const yearEnd=new Date(yr+1,0,1);
-      const segEnd=yearEnd<d2?yearEnd:d2;
-      const segDays=(segEnd-cur)/86400000;
-      // Interpolate INR at cur and segEnd
-      const totalDays=(d2-d1)/86400000;
-      const t1=(cur-d1)/86400000, t2=(segEnd-d1)/86400000;
-      const inr1=dated[i-1].inr+(dated[i].inr-dated[i-1].inr)*(t1/totalDays);
-      const inr2=dated[i-1].inr+(dated[i].inr-dated[i-1].inr)*(t2/totalDays);
-      if(!years[yr]) years[yr]={totalDays:0,inRangeDays:0};
-      years[yr].totalDays+=segDays;
-      years[yr].inRangeDays+=inRangeDuration(inr1,inr2,segDays,low,high);
-      cur=segEnd;
+    const d1 = dated[i-1].date, d2 = dated[i].date;
+    const days = (d2-d1)/86400000;
+    if(days <= 0) continue;
+    const pts = [d1, ..._ttrCutPoints(d1,d2,history), d2];
+    for(let k=0;k<pts.length-1;k++){
+      const s = pts[k], e = pts[k+1];
+      const segDays = (e-s)/86400000;
+      if(segDays <= 0) continue;
+      const inr1 = dated[i-1].inr + (dated[i].inr-dated[i-1].inr) * (((s-d1)/86400000)/days);
+      const inr2 = dated[i-1].inr + (dated[i].inr-dated[i-1].inr) * (((e-d1)/86400000)/days);
+      const r = rangeAt(s.getTime(), low, high, history, widen);
+      const inDays = inRangeDuration(inr1, inr2, segDays, r.low, r.high);
+      out.total.totalDays += segDays; out.total.inRangeDays += inDays;
+      const yr = s.getFullYear();
+      if(!out.years[yr]) out.years[yr] = {totalDays:0, inRangeDays:0};
+      out.years[yr].totalDays += segDays; out.years[yr].inRangeDays += inDays;
     }
   }
-  const result={};
-  for(const [yr,v] of Object.entries(years)){
-    result[yr]=v.totalDays>0?Math.round((v.inRangeDays/v.totalDays)*1000)/10:null;
+  return out;
+}
+function calcTTR(visits, low, high, history, widen){
+  const a = _ttrAccumulate(visits, low, high, history, widen);
+  if(a.n < 2 || a.total.totalDays === 0) return null;
+  return (a.total.inRangeDays / a.total.totalDays) * 100;
+}
+function calcExtendedTTR(visits, low, high, history){
+  return calcTTR(visits, low, high, history, 0.2);
+}
+function calcTTRByYear(visits, low, high, history, widen){
+  const a = _ttrAccumulate(visits, low, high, history, widen);
+  const result = {};
+  for(const [yr,v] of Object.entries(a.years)){
+    result[yr] = v.totalDays>0 ? Math.round((v.inRangeDays/v.totalDays)*1000)/10 : null;
   }
   return result;
 }
-// ── "Main" TTR number now reflects the CURRENT calendar year only (not
-// lifetime-cumulative). Uses the same year-splitting logic as calcTTRByYear,
-// just picks out this year's figure. calcTTR/calcExtendedTTR (all-time) are
-// kept for the explicit "All time" option on the TTR Overview page.
+// ── "Main" TTR number reflects the CURRENT calendar year only (not
+// lifetime-cumulative). calcTTR/calcExtendedTTR (all-time) are kept for the
+// explicit "All time" option on the TTR Overview page.
 function getCurrentYear(){ return new Date().getFullYear(); }
-function calcCurrentYearTTR(visits, low, high){
-  const byYear = calcTTRByYear(visits, low, high);
+function calcCurrentYearTTR(visits, low, high, history, widen){
+  const byYear = calcTTRByYear(visits, low, high, history, widen);
   const yr = getCurrentYear();
   return (byYear[yr] !== undefined) ? byYear[yr] : null;
 }
-function calcCurrentYearExtendedTTR(visits, low, high){
-  return calcCurrentYearTTR(visits, low - 0.2, high + 0.2);
+function calcCurrentYearExtendedTTR(visits, low, high, history){
+  return calcCurrentYearTTR(visits, low, high, history, 0.2);
 }
 
 // ---------- Rule-based dosing suggestion ----------
@@ -1372,7 +1422,7 @@ async function renderPatientList(){
     // Non-blocking: use setTimeout to yield to UI between each patient
     setTimeout(async()=>{
       const visits = await loadVisits(p.id);
-      const ttr = calcCurrentYearTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
+      const ttr = calcCurrentYearTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh), p.targetHistory);
       const status = getPatientStatus(visits);
       ttrCache[p.id] = {ttr, status};
       // Patch the row in-place without re-rendering the whole list
@@ -1617,7 +1667,7 @@ async function showAllPatients(q){
   for(const p of uncached){
     setTimeout(async()=>{
       const visits = await loadVisits(p.id);
-      const ttr = calcCurrentYearTTR(visits,parseFloat(p.targetLow),parseFloat(p.targetHigh));
+      const ttr = calcCurrentYearTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh), p.targetHistory);
       const status = getPatientStatus(visits);
       ttrCache[p.id]={ttr,status};
       // Re-render the specific row
@@ -1795,7 +1845,7 @@ async function buildApptCard(dateStr){
     const thisDateAppt = visits.filter(v=>v.nextAppt===dateStr);
     if(!thisDateAppt.length) continue;
     const hasVisitToday = visits.some(v=>v.date===dateStr);
-    const ttr = calcCurrentYearTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
+    const ttr = calcCurrentYearTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh), p.targetHistory);
     appts.push({p, reviewed:hasVisitToday, ttr, inrDayBefore:thisDateAppt[0].inrDayBefore||false, isRescheduled:false});
   }
   // 2. Rescheduled defaulters with new_tca matching this date
@@ -1811,7 +1861,7 @@ async function buildApptCard(dateStr){
         if(appts.find(a=>a.p.id===p.id)) continue; // already in list
         const visits = await loadVisits(p.id);
         const hasVisitToday = visits.some(v=>v.date===dateStr);
-        const ttr = calcCurrentYearTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
+        const ttr = calcCurrentYearTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh), p.targetHistory);
         appts.push({p, reviewed:hasVisitToday, ttr, inrDayBefore:false, isRescheduled:true});
       }
     }
@@ -1865,7 +1915,7 @@ async function refreshApptCard(dateStr){
     const thisDateAppt = visits.filter(v=>v.nextAppt===dateStr);
     if(!thisDateAppt.length) continue;
     const hasVisitToday = visits.some(v=>v.date===dateStr);
-    const ttr = calcCurrentYearTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
+    const ttr = calcCurrentYearTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh), p.targetHistory);
     appts.push({p, reviewed:hasVisitToday, ttr, inrDayBefore:thisDateAppt[0].inrDayBefore||false, isRescheduled:false});
   }
   // Rescheduled defaulters
@@ -1881,7 +1931,7 @@ async function refreshApptCard(dateStr){
         if(appts.find(a=>a.p.id===p.id)) continue;
         const visits = await loadVisits(p.id);
         const hasVisitToday = visits.some(v=>v.date===dateStr);
-        const ttr = calcCurrentYearTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
+        const ttr = calcCurrentYearTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh), p.targetHistory);
         appts.push({p, reviewed:hasVisitToday, ttr, inrDayBefore:false, isRescheduled:true});
       }
     }
@@ -2146,8 +2196,8 @@ async function renderMain(){
   const p = patients.find(x => x.id === currentPatientId);
   const visits = await loadVisits(currentPatientId);
   const low = parseFloat(p.targetLow), high = parseFloat(p.targetHigh);
-  const ttr = calcCurrentYearTTR(visits, low, high);
-  const extTTR = calcCurrentYearExtendedTTR(visits, low, high);
+  const ttr = calcCurrentYearTTR(visits, low, high, p.targetHistory);
+  const extTTR = calcCurrentYearExtendedTTR(visits, low, high, p.targetHistory);
   const lastVisit = visits.slice().filter(v=>v.date).sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
 
   // Status strip
@@ -2270,6 +2320,7 @@ function renderProfilePanel(p){
       field('Name','pf_name',p.name)+field('MRN','pf_mrn',p.mrn)+field('Phone number','pf_phone',p.phone)+
       field('Indication','pf_indication',p.indication)+field('Target INR low','pf_targetLow',p.targetLow,'number','0.1')+
       field('Target INR high','pf_targetHigh',p.targetHigh,'number','0.1')+
+      renderTargetHistoryHtml(p)+
       field('Warfarin initiation date','pf_initiationDate',p.initiationDate||'','date')+
       field('Pending first appointment (before 1st review)','pf_pendingFirstAppt',p.pendingFirstAppt||'','date')+
       '<div class="field"><label>Duration of therapy</label><input id="pf_duration" value="'+escapeHtml(p.duration)+'" placeholder="e.g. 6 months, lifelong"></div>'+
@@ -2368,20 +2419,100 @@ function handleNotesEnter(e){
   ta.value=val.substring(0,pos)+insert+val.substring(pos);
   ta.selectionStart=ta.selectionEnd=pos+insert.length;
 }
+// ── Target range change (keeps TTR accurate when the range changes mid-treatment) ──
+let _targetChangeResolver = null;
+let _targetChangeCtx = null;
+function askTargetChange(p, oldLow, oldHigh, newLow, newHigh){
+  return new Promise(resolve=>{
+    _targetChangeResolver = resolve;
+    const hist = p.targetHistory||[];
+    const lastFrom = hist.length ? hist[hist.length-1].from : null;
+    _targetChangeCtx = {lastFrom};
+    document.getElementById("tc_summary").innerHTML = 'Changing target from <b>'+oldLow+'–'+oldHigh+'</b> to <b>'+newLow+'–'+newHigh+'</b>.';
+    document.getElementById("tcError").innerText = "";
+    const dEl = document.getElementById("tc_date");
+    dEl.max = localDateStr(new Date());
+    dEl.value = localDateStr(new Date());
+    document.querySelector('input[name="tc_mode"][value="from"]').checked = true;
+    onTargetChangeMode();
+    document.getElementById("targetChangeModal").classList.add("show");
+  });
+}
+function onTargetChangeMode(){
+  const mode = document.querySelector('input[name="tc_mode"]:checked').value;
+  document.getElementById("tc_date_wrap").style.display = mode==="from" ? "block" : "none";
+}
+function resolveTargetChange(result){
+  document.getElementById("targetChangeModal").classList.remove("show");
+  const r = _targetChangeResolver; _targetChangeResolver = null;
+  if(r) r(result);
+}
+function confirmTargetChange(){
+  const mode = document.querySelector('input[name="tc_mode"]:checked').value;
+  const errBox = document.getElementById("tcError");
+  errBox.innerText = "";
+  if(mode === "correct"){ resolveTargetChange({mode:"correct"}); return; }
+  const date = document.getElementById("tc_date").value;
+  if(!date){ errBox.innerText = "Choose the date the new range takes effect."; return; }
+  if(date > localDateStr(new Date())){ errBox.innerText = "The effective date can't be in the future."; return; }
+  const lastFrom = _targetChangeCtx && _targetChangeCtx.lastFrom;
+  if(lastFrom && lastFrom !== '1900-01-01' && date <= lastFrom){ errBox.innerText = "Must be after the previous range change ("+lastFrom+")."; return; }
+  resolveTargetChange({mode:"from", date});
+}
+function applyTargetChange(p, oldLow, oldHigh, newLow, newHigh, choice){
+  if(choice.mode === "correct"){
+    p.targetHistory = [];
+  } else {
+    const hist = (p.targetHistory && p.targetHistory.length) ? p.targetHistory.map(e=>({...e})) : [{from:'1900-01-01', low:oldLow, high:oldHigh}];
+    const existing = hist.findIndex(e=>e.from===choice.date);
+    if(existing>=0) hist[existing] = {from:choice.date, low:newLow, high:newHigh};
+    else hist.push({from:choice.date, low:newLow, high:newHigh});
+    hist.sort((a,b)=>a.from<b.from?-1:a.from>b.from?1:0);
+    p.targetHistory = hist;
+  }
+  p.targetLow = newLow; p.targetHigh = newHigh;
+  invalidateTTRCache(p.id);
+  writeAuditLog("patients", p.id, "TARGET_RANGE_CHANGE", {from:oldLow+"–"+oldHigh, to:newLow+"–"+newHigh, mode:choice.mode, effective:choice.date||null});
+}
+function renderTargetHistoryHtml(p){
+  const hist = p.targetHistory||[];
+  if(hist.length < 2) return '';
+  const rows = hist.map((e,i)=>{
+    const next = hist[i+1];
+    const span = (e.from==='1900-01-01' ? 'Start' : e.from) + ' → ' + (next ? next.from : 'present');
+    return '<tr><td style="font-size:12px;">'+escapeHtml(span)+'</td><td style="font-size:12px; font-family:var(--mono);">'+e.low+'–'+e.high+'</td></tr>';
+  }).join('');
+  return '<div class="field span2"><label>Target INR range history</label>'+
+    '<table class="ttr-table" style="max-width:340px;"><thead><tr><th>Period</th><th>Target</th></tr></thead><tbody>'+rows+'</tbody></table>'+
+    '<p class="hint" style="margin:4px 0 0;">TTR judges each reading against the range in effect on that date.</p></div>';
+}
+
 async function saveProfile(){
   const p = patients.find(x => x.id === currentPatientId);
   if(!p){ showToast("No patient selected","error"); return; }
   const nameEl = document.getElementById("pf_name");
   const mrnEl = document.getElementById("pf_mrn");
   if(!nameEl || !mrnEl){ showToast("Profile form not found — try reloading the patient","error"); return; }
+  const oldLow = parseFloat(p.targetLow), oldHigh = parseFloat(p.targetHigh);
+  const parsedLow = parseFloat(document.getElementById("pf_targetLow").value);
+  const parsedHigh = parseFloat(document.getElementById("pf_targetHigh").value);
+  const newLow = isNaN(parsedLow) ? oldLow : parsedLow;
+  const newHigh = isNaN(parsedHigh) ? oldHigh : parsedHigh;
+  if(newLow !== oldLow || newHigh !== oldHigh){
+    if(newLow >= newHigh){ showToast("Target low must be below target high.","error",4000); return; }
+    const hasReadings = (visitsCache[p.id]||[]).some(v=>v.date && v.inr!==null && v.inr!=="" && !isNaN(v.inr));
+    if(hasReadings){
+      const choice = await askTargetChange(p, oldLow, oldHigh, newLow, newHigh);
+      if(!choice){ showToast("Target range change cancelled — nothing saved.","info",3000); return; }
+      applyTargetChange(p, oldLow, oldHigh, newLow, newHigh, choice);
+    } else {
+      p.targetLow = newLow; p.targetHigh = newHigh;
+    }
+  }
   p.name = nameEl.value.trim() || p.name;
   p.mrn = mrnEl.value.trim() || p.mrn;
   p.phone = document.getElementById("pf_phone").value.trim();
   p.indication = document.getElementById("pf_indication").value.trim();
-  const newLow = parseFloat(document.getElementById("pf_targetLow").value);
-  const newHigh = parseFloat(document.getElementById("pf_targetHigh").value);
-  if(!isNaN(newLow)) p.targetLow = newLow;
-  if(!isNaN(newHigh)) p.targetHigh = newHigh;
   p.duration = document.getElementById("pf_duration").value.trim();
   p.notes = document.getElementById("pf_notes").value.trim();
   p.initiationDate = document.getElementById("pf_initiationDate").value || "";
@@ -2415,7 +2546,7 @@ async function deletePatient(){
 // Pairs each regime/TWD that was prescribed with the INR result at the
 // FOLLOWING visit (since a regime's effect only shows up next time), then
 // aggregates by regime to see which one has kept this patient in range most.
-function analyzeRegimeHistory(visits, low, high){
+function analyzeRegimeHistory(visits, low, high, history){
   const sorted = [...visits].filter(v=>v.date).sort((a,b)=>new Date(a.date)-new Date(b.date));
   const outcomes = [];
   let activeLabel = null;
@@ -2424,7 +2555,8 @@ function analyzeRegimeHistory(visits, low, high){
     if(activeLabel !== null){
       const inr = parseFloat(v.inr);
       if(!isNaN(inr)){
-        const inRange = inr>=low && inr<=high;
+        const rg = rangeAt(new Date(v.date).getTime(), low, high, history, 0);
+        const inRange = inr>=rg.low && inr<=rg.high;
         const confounded = !!(v.factors && v.factors.length && !(v.factors.length===1 && v.factors[0]==="No significant factor detected"));
         outcomes.push({regime:activeLabel, inr, inRange, confounded});
       }
@@ -2454,7 +2586,7 @@ function regimeInsightsTable(list){
 }
 function buildRegimeInsightsHtml(p, visits){
   const low = parseFloat(p.targetLow||2), high = parseFloat(p.targetHigh||3);
-  const analysis = analyzeRegimeHistory(visits, low, high);
+  const analysis = analyzeRegimeHistory(visits, low, high, p.targetHistory);
   window._regimeInsights = analysis;
   if(analysis.totalOutcomes===0){
     return '<div class="card" id="regimeInsightsCard"><h3>Regime insights</h3><div class="hint">Not enough visit history yet to analyze which regime works best for this patient — insights will appear once there are at least two reviews.</div></div>';
@@ -2737,7 +2869,8 @@ async function saveReview(){
 
   // If INR is out of range, at least one factor must be selected
   const p = patients.find(x=>x.id===currentPatientId);
-  const low = parseFloat(p?.targetLow||2), high = parseFloat(p?.targetHigh||3);
+  const rangeOnDate = p ? getTargetRangeOn(p, date) : {low:2, high:3};
+  const low = rangeOnDate.low || 2, high = rangeOnDate.high || 3;
   const inrNum = parseFloat(inr);
   const outOfRange = !isNaN(inrNum) && (inrNum < low || inrNum > high);
   const checkedFactors = [...document.querySelectorAll(".factor-check")].filter(c=>c.checked);
@@ -2905,7 +3038,7 @@ function renderHistoryPanel(p, visits, ttr, extTTR){
       (extTTR!==null?'<div><div style="font-size:11px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:4px;">Extended TTR '+getCurrentYear()+' ('+(parseFloat(p.targetLow)-0.2).toFixed(1)+'–'+(parseFloat(p.targetHigh)+0.2).toFixed(1)+')</div><span class="badge '+extCls+'" style="font-size:15px; padding:4px 12px;">'+extTTR.toFixed(1)+'%</span></div>':'')+
     '</div>';
     // TTR by year
-    const byYear = calcTTRByYear(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
+    const byYear = calcTTRByYear(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh), p.targetHistory);
     const years = Object.keys(byYear).sort();
     if(years.length>0){
       ttrSummary += '<div style="font-size:11px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:8px;">TTR by calendar year</div>';
@@ -2927,8 +3060,8 @@ function renderHistoryPanel(p, visits, ttr, extTTR){
   } else {
     for(const v of sorted){
       const inrNum = parseFloat(v.inr);
-      const low = parseFloat(p.targetLow), high = parseFloat(p.targetHigh);
-      const inRange = !isNaN(inrNum) && inrNum>=low && inrNum<=high;
+      const rgOn = getTargetRangeOn(p, v.date);
+      const inRange = !isNaN(inrNum) && inrNum>=rgOn.low && inrNum<=rgOn.high;
       if(v.isExternal){
         rows += '<tr style="background:#FCFAF3;">'+
           '<td>'+escapeHtml(v.date)+'<br>'+
@@ -3153,11 +3286,13 @@ async function editReview(visitId){
 
 // ---------- TTR Overview ----------
 // ── TTR conclusion (used by TTR Overview page + CSV export) ──
-function dominantOutOfRangeFactor(visits, low, high){
+function dominantOutOfRangeFactor(visits, low, high, history){
   const counts = {};
   for(const v of visits){
     const inr = parseFloat(v.inr);
-    if(isNaN(inr) || (inr>=low && inr<=high)) continue;
+    if(isNaN(inr) || !v.date) continue;
+    const rg = rangeAt(new Date(v.date).getTime(), low, high, history, 0);
+    if(inr>=rg.low && inr<=rg.high) continue;
     for(const f of (v.factors||[])){
       if(f==="No significant factor detected") continue;
       counts[f] = (counts[f]||0)+1;
@@ -3174,7 +3309,7 @@ function computeTTRConclusion(d){
   if(d.ttr>=70) conclusion = "Good anticoagulation control (TTR \u226570%).";
   else if(d.ttr>=60) conclusion = "Acceptable control (TTR 60\u201369%) — continue routine monitoring.";
   else{
-    const factor = d.visits ? dominantOutOfRangeFactor(d.visits, parseFloat(d.p.targetLow), parseFloat(d.p.targetHigh)) : null;
+    const factor = d.visits ? dominantOutOfRangeFactor(d.visits, parseFloat(d.p.targetLow), parseFloat(d.p.targetHigh), d.p.targetHistory) : null;
     conclusion = "Poor control (TTR <60%)"+(factor?" — most out-of-range readings linked to "+factor.toLowerCase()+";":" —")+" consider dose/regime review.";
   }
   if(d.exclusionReasons && d.exclusionReasons.length) conclusion += " Meets criteria for possible TTR exclusion — review.";
@@ -3222,14 +3357,14 @@ async function renderTTROverview(year){
   for(const p of allPatients){
     const visits = await loadVisits(p.id);
     const low = parseFloat(p.targetLow), high = parseFloat(p.targetHigh);
-    const byYear = calcTTRByYear(visits, low, high);
-    const byYearExt = calcTTRByYear(visits, low-0.2, high+0.2);
+    const byYear = calcTTRByYear(visits, low, high, p.targetHistory);
+    const byYearExt = calcTTRByYear(visits, low, high, p.targetHistory, 0.2);
     Object.keys(byYear).forEach(y=>yearsSeen.add(y));
 
     let ttr, extTTR;
     if(year === 'all'){
-      ttr = calcTTR(visits, low, high);
-      extTTR = calcExtendedTTR(visits, low, high);
+      ttr = calcTTR(visits, low, high, p.targetHistory);
+      extTTR = calcExtendedTTR(visits, low, high, p.targetHistory);
     } else {
       ttr = (byYear[year] !== undefined) ? byYear[year] : null;
       extTTR = (byYearExt[year] !== undefined) ? byYearExt[year] : null;
@@ -3723,7 +3858,7 @@ async function renderAnalysisView(){
   for(const p of patients){
     if(p.isActive===false || p.ttrExcluded) continue;
     const visits = await loadVisits(p.id);
-    const ttr = calcCurrentYearTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
+    const ttr = calcCurrentYearTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh), p.targetHistory);
     if(ttr!==null) ttrData.push({p, ttr, visits});
   }
 
@@ -3895,9 +4030,9 @@ async function generatePatientReport(patientId){
   if(!p){ alert("Select a patient first."); return; }
   const visits = await loadVisits(p.id);
   const low=parseFloat(p.targetLow), high=parseFloat(p.targetHigh);
-  const ttr=calcCurrentYearTTR(visits,low,high);
-  const extTTR=calcCurrentYearExtendedTTR(visits,low,high);
-  const byYear=calcTTRByYear(visits,low,high);
+  const ttr=calcCurrentYearTTR(visits, low, high, p.targetHistory);
+  const extTTR=calcCurrentYearExtendedTTR(visits, low, high, p.targetHistory);
+  const byYear=calcTTRByYear(visits, low, high, p.targetHistory);
   const sorted=[...visits].filter(v=>v.date).sort((a,b)=>new Date(a.date)-new Date(b.date));
   const sortedDesc=[...sorted].reverse();
   const flags=getSpecialFlags(p,visits);
@@ -3933,13 +4068,16 @@ async function generatePatientReport(patientId){
 
   // INR pattern
   const inrs=sorted.filter(v=>v.inr&&!isNaN(v.inr)).map(v=>parseFloat(v.inr));
-  const belowCount=inrs.filter(v=>v<low).length;
-  const aboveCount=inrs.filter(v=>v>high).length;
-  const inCount=inrs.filter(v=>v>=low&&v<=high).length;
+  let belowCount=0, aboveCount=0, inCount=0;
+  sorted.filter(v=>v.inr&&!isNaN(v.inr)).forEach(v=>{
+    const rg=getTargetRangeOn(p, v.date), x=parseFloat(v.inr);
+    if(x<rg.low) belowCount++; else if(x>rg.high) aboveCount++; else inCount++;
+  });
+  const multiRange = !!(p.targetHistory && p.targetHistory.length>1);
   if(inrs.length>0){
-    if(belowCount>aboveCount&&belowCount>inCount) analysisLines.push('INR is predominantly <b>sub-therapeutic</b> ('+belowCount+' of '+inrs.length+' readings below '+low+'). Consider whether dose is consistently adequate, and review compliance and diet.');
-    else if(aboveCount>belowCount&&aboveCount>inCount) analysisLines.push('INR is predominantly <b>supra-therapeutic</b> ('+aboveCount+' of '+inrs.length+' readings above '+high+'). Review for drug interactions, diet changes, or over-compliance.');
-    else analysisLines.push(inCount+' of '+inrs.length+' INR readings ('+Math.round(inCount/inrs.length*100)+'%) were within the target range of '+low+'–'+high+'.');
+    if(belowCount>aboveCount&&belowCount>inCount) analysisLines.push('INR is predominantly <b>sub-therapeutic</b> ('+belowCount+' of '+inrs.length+' readings below target'+(multiRange?'':' '+low)+'). Consider whether dose is consistently adequate, and review compliance and diet.');
+    else if(aboveCount>belowCount&&aboveCount>inCount) analysisLines.push('INR is predominantly <b>supra-therapeutic</b> ('+aboveCount+' of '+inrs.length+' readings above target'+(multiRange?'':' '+high)+'). Review for drug interactions, diet changes, or over-compliance.');
+    else analysisLines.push(inCount+' of '+inrs.length+' INR readings ('+Math.round(inCount/inrs.length*100)+'%) were within the target range'+(multiRange?' in effect at the time':' of '+low+'–'+high)+'.');
   }
 
   // Regime recommendation — use the last CLINICAL visit (excludes external/
@@ -3975,7 +4113,8 @@ async function generatePatientReport(patientId){
 
   const histRows=sortedDesc.map(v=>{
     const inrNum=parseFloat(v.inr);
-    const inRange=!isNaN(inrNum)&&inrNum>=low&&inrNum<=high;
+    const rgV=getTargetRangeOn(p, v.date);
+    const inRange=!isNaN(inrNum)&&inrNum>=rgV.low&&inrNum<=rgV.high;
     return `<tr>
       <td>${escapeHtml(v.date)}${v.isExternal?' <span class="badge" style="font-size:10px; background:#EEE; color:#666;">External</span>':''}</td>
       <td><span class="badge ${v.inr?(inRange?'good':'bad'):''}">${v.inr||'--'}</span></td>
@@ -3990,7 +4129,7 @@ async function generatePatientReport(patientId){
 
   const html=`
     <h1>Patient Report — ${escapeHtml(p.name)}</h1>
-    <div class="meta">Generated: ${new Date().toLocaleDateString()} &nbsp;|&nbsp; MRN: ${escapeHtml(p.mrn)} &nbsp;|&nbsp; ${escapeHtml(p.indication||'—')} &nbsp;|&nbsp; Target INR: ${p.targetLow}–${p.targetHigh} &nbsp;|&nbsp; Duration: ${escapeHtml(p.duration||'—')}</div>
+    <div class="meta">Generated: ${new Date().toLocaleDateString()} &nbsp;|&nbsp; MRN: ${escapeHtml(p.mrn)} &nbsp;|&nbsp; ${escapeHtml(p.indication||'—')} &nbsp;|&nbsp; Target INR: ${p.targetLow}–${p.targetHigh}${targetHistoryText(p)} &nbsp;|&nbsp; Duration: ${escapeHtml(p.duration||'—')}</div>
     <div class="meta" style="margin-top:4px;">Phone: ${escapeHtml(p.phone||'—')} &nbsp;|&nbsp; Initiation: ${escapeHtml(p.initiationDate||'—')} &nbsp;|&nbsp; Status: ${escapeHtml(status.label)}</div>
     ${p.notes?'<div class="flag" style="margin-top:8px;"><b>Clinical notes:</b><br>'+escapeHtml(p.notes).replace(/\n/g,'<br>')+'</div>':''}
     ${p.passoverNotes?'<div class="flag" style="margin-top:8px; background:#FFFBEA; border-color:#E8C060; color:#5A3D00;"><b>📋 Passover notes:</b><br>'+escapeHtml(p.passoverNotes).replace(/\n/g,'<br>')+'</div>':''}
@@ -4022,9 +4161,9 @@ async function generateTTRReport(){
   for(const p of [...patients].sort((a,b)=>a.name.localeCompare(b.name))){
     if(p.isActive===false) continue;
     const visits=await loadVisits(p.id);
-    const ttr=calcCurrentYearTTR(visits,parseFloat(p.targetLow),parseFloat(p.targetHigh));
-    const extTTR=calcCurrentYearExtendedTTR(visits,parseFloat(p.targetLow),parseFloat(p.targetHigh));
-    const byYear=calcTTRByYear(visits,parseFloat(p.targetLow),parseFloat(p.targetHigh));
+    const ttr=calcCurrentYearTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh), p.targetHistory);
+    const extTTR=calcCurrentYearExtendedTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh), p.targetHistory);
+    const byYear=calcTTRByYear(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh), p.targetHistory);
     const flags=getSpecialFlags(p,visits);
     const status=getPatientStatus(visits);
     // Per-patient factor count (from all visits, not just out-of-range)
@@ -4210,7 +4349,7 @@ async function generateAppointmentList(){
   for(const p of patients){
     if(p.isActive===false) continue;
     const visits=await loadVisits(p.id);
-    const ttr=calcCurrentYearTTR(visits,parseFloat(p.targetLow),parseFloat(p.targetHigh));
+    const ttr=calcCurrentYearTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh), p.targetHistory);
     // Include every appointment ever set (not just the patient's single latest
     // one) so a patient who has already been seen stays on the list for that
     // date, tagged as Done, instead of disappearing once a new future TCA
@@ -4466,7 +4605,7 @@ async function exportAppointmentExcel(){
   for(const p of patients){
     if(p.isActive===false) continue;
     const visits = await loadVisits(p.id);
-    const ttr = calcCurrentYearTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh));
+    const ttr = calcCurrentYearTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh), p.targetHistory);
     const sorted = [...visits].filter(v=>v.date&&v.nextAppt).sort((a,b)=>new Date(b.date)-new Date(a.date));
     if(!sorted.length) continue;
     const last = sorted[0];
