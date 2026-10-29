@@ -2561,7 +2561,8 @@ function analyzeRegimeHistory(visits, low, high, history){
         outcomes.push({regime:activeLabel, inr, inRange, confounded});
       }
     }
-    if(v.regimeLabel) activeLabel = v.regimeLabel;
+    if(v.planAction==='refer_mopd') activeLabel = null; // doctor decides the regime; don't credit the old one
+    else if(v.regimeLabel) activeLabel = v.regimeLabel;
     else if(v.newTwd) activeLabel = 'TWD '+v.newTwd+'mg/week';
     // else: plan was "continue" with no explicit regime — carry the active one forward
   }
@@ -2684,7 +2685,7 @@ async function renderReviewPanel(p){
           '<div class="field"><label>Calculated new TWD</label><input id="rv_withhold_twd_calc" readonly style="background:#F3F5F8; color:var(--ink-soft);"></div>'+
           '<div></div></div></div>'+
       '<div class="grid" style="margin-top:8px;">'+
-        '<div class="field"><label>New TWD (mg/week)</label><input id="rv_new_twd" type="number" step="0.5" oninput="onNewTwdChange()"></div>'+
+        '<div class="field" id="rv_new_twd_field"><label>New TWD (mg/week)</label><input id="rv_new_twd" type="number" step="0.5" oninput="onNewTwdChange()"></div>'+
         '<div class="field"><label>Next appointment</label><input id="rv_next_appt" type="date" onchange="checkAppointmentCapacity(this.value)"></div>'+
         '<div class="field" style="justify-content:flex-end; padding-top:4px;">'+
           '<label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; margin-top:20px;">'+
@@ -2705,7 +2706,8 @@ async function renderReviewPanel(p){
       '<div class="field" style="margin-top:14px;"><label>Plan notes (optional)</label>'+
         '<textarea id="rv_plan_notes" rows="3" placeholder="Any additional notes about this plan…" style="width:100%; padding:8px 10px; border-radius:7px; border:1px solid var(--line); font-size:13px; font-family:inherit; resize:vertical;"></textarea>'+
       '</div>'+
-      '<div class="regime-section" style="margin-top:14px;">'+
+      '<div id="rv_mopd_note" class="flag" style="display:none; margin-top:14px; background:#EDF3FB; border-color:#B7CFE5; color:#2C5A8C;">Referred to MOPD — the warfarin dose and regime will be decided by the doctor, so none is recorded here.</div>'+
+      '<div class="regime-section" id="rv_regime_section" style="margin-top:14px;">'+
         '<b style="font-size:13px;">Warfarin regime</b>'+
         '<div style="display:flex; align-items:center; gap:10px; margin-top:8px; margin-bottom:8px;">'+
           '<label style="font-size:12.5px; white-space:nowrap;">Start day:</label>'+
@@ -2728,6 +2730,7 @@ async function renderReviewPanel(p){
     '</div>';
 
   selectedRegimeLabel = "";
+  window._mopdHidden = false;
   editingVisitId = null;
   onInrChange(p);
 
@@ -2760,9 +2763,35 @@ function onPlanChange(){
   document.getElementById("rv_reduce_wrap").style.display = action==="reduce" ? "block" : "none";
   document.getElementById("rv_load_wrap").style.display = action==="load" ? "block" : "none";
   document.getElementById("rv_withhold_wrap").style.display = action==="withhold" ? "block" : "none";
+
+  // Refer MOPD: the doctor decides the dose/regime, so hide and clear both here.
+  const isMopd = action==="refer_mopd";
+  const regimeSec = document.getElementById("rv_regime_section");
+  const twdField = document.getElementById("rv_new_twd_field");
+  const mopdNote = document.getElementById("rv_mopd_note");
+  const newTwdEl = document.getElementById("rv_new_twd");
+  if(regimeSec) regimeSec.style.display = isMopd ? "none" : "";
+  if(twdField) twdField.style.display = isMopd ? "none" : "";
+  if(mopdNote) mopdNote.style.display = isMopd ? "block" : "none";
+  if(isMopd){
+    if(newTwdEl) newTwdEl.value = "";
+    selectedRegimeLabel = "";
+    const otherCb = document.getElementById("rv_regime_other"); if(otherCb) otherCb.checked = false;
+    const manual = document.getElementById("rv_regime_manual"); if(manual) manual.value = "";
+    const otherWrap = document.getElementById("rv_regime_other_wrap"); if(otherWrap) otherWrap.style.display = "none";
+    const sugBox = document.getElementById("regimeSuggestBox");
+    if(sugBox){ sugBox.style.display = "block"; sugBox.innerHTML = '<div class="hint">Enter a new TWD above to see the suggested regime.</div>'; }
+    window._mopdHidden = true;
+    return;
+  }
+  if(window._mopdHidden){
+    // Leaving Refer MOPD: restore the current dose as the starting point
+    window._mopdHidden = false;
+    const twdEl = document.getElementById("rv_twd");
+    if(newTwdEl && !newTwdEl.value && twdEl && twdEl.value){ newTwdEl.value = twdEl.value; onNewTwdChange(); }
+  }
   if(action==="continue"){
     const twdEl=document.getElementById("rv_twd");
-    const newTwdEl=document.getElementById("rv_new_twd");
     if(twdEl&&newTwdEl&&twdEl.value){ newTwdEl.value=twdEl.value; onNewTwdChange(); }
   }
 }
@@ -2946,10 +2975,10 @@ async function saveReview(){
     admitDx: document.getElementById("rv_admit_dx").value.trim(),
     admitInterrupted: document.getElementById("rv_admit_interrupted")?.checked||false,
     planAction, planDays, planLoadMg, planSubAction, planSubPct,
-    newTwd, nextAppt,
+    newTwd: planAction==="refer_mopd" ? "" : newTwd, nextAppt,
     clinicalNote: ruleBox ? ruleBox.innerText.replace("Rule-based suggestion: ","") : "",
     planNotes: document.getElementById("rv_plan_notes")?.value?.trim() || "",
-    regimeLabel: selectedRegimeLabel || "",
+    regimeLabel: planAction==="refer_mopd" ? "" : (selectedRegimeLabel || ""),
     reviewer: currentReviewerName || currentSession?.user?.email || ""
   };
 
@@ -3087,7 +3116,7 @@ function renderHistoryPanel(p, visits, ttr, extTTR){
         '<td><span class="badge '+(inRange?'badge-good':'badge-bad')+'">'+(v.inr||'--')+'</span><br><span style="font-size:11px; color:var(--ink-soft);">TWD '+(v.twd||'--')+'mg</span></td>'+
         '<td>'+(factorsHtml||'<span style="color:var(--ink-soft);">&mdash;</span>')+'</td>'+
         '<td>'+admitHtml+'</td>'+
-        '<td>'+escapeHtml(planLabel(v))+'<br><span style="font-size:11px; color:var(--ink-soft);">New TWD '+(v.newTwd||'--')+'mg</span>'+(v.regimeLabel?'<br><span style="font-size:11px; color:var(--ink-soft); font-style:italic;">'+escapeHtml(v.regimeLabel)+'</span>':'')+(v.caseDiscussedDr?'<br><span class="tag" style="background:#EDF3FB; color:#2C5A8C;">Discussed with Dr '+escapeHtml(v.doctorName||'')+'</span>':'')+(v.planNotes?'<br><span style="font-size:11px; color:var(--ink-soft);">📝 '+escapeHtml(v.planNotes)+'</span>':'')+'</td>'+
+        '<td>'+escapeHtml(planLabel(v))+'<br><span style="font-size:11px; color:var(--ink-soft);">'+(v.planAction==="refer_mopd"?'Regime to be decided by doctor':'New TWD '+(v.newTwd||'--')+'mg')+'</span>'+(v.regimeLabel?'<br><span style="font-size:11px; color:var(--ink-soft); font-style:italic;">'+escapeHtml(v.regimeLabel)+'</span>':'')+(v.caseDiscussedDr?'<br><span class="tag" style="background:#EDF3FB; color:#2C5A8C;">Discussed with Dr '+escapeHtml(v.doctorName||'')+'</span>':'')+(v.planNotes?'<br><span style="font-size:11px; color:var(--ink-soft);">📝 '+escapeHtml(v.planNotes)+'</span>':'')+'</td>'+
         '<td>'+(v.nextAppt||'<span style="color:var(--ink-soft);">&mdash;</span>')+(v.longerTca?' <span class="tag" style="background:#FEF3E7; color:#7A4A0A;">longer TCA</span>':'')+'</td>'+
         '<td style="font-size:11.5px; color:var(--ink-soft);">'+escapeHtml(v.reviewer||'—')+'</td>'+
       '</tr>';
@@ -3281,7 +3310,7 @@ async function editReview(visitId){
   // Update save button label
   const btn=document.getElementById("saveReviewBtn"); if(btn) btn.innerText="Update review";
   await onInrChange(p);
-  if(v.newTwd) await onNewTwdChange();
+  if(v.newTwd && v.planAction!=="refer_mopd") await onNewTwdChange();
 }
 
 // ---------- TTR Overview ----------
@@ -4083,7 +4112,8 @@ async function generatePatientReport(patientId){
   // Regime recommendation — use the last CLINICAL visit (excludes external/
   // non-review INR entries, which carry no dose/regime info).
   const lastVisit=sortedDesc.filter(v=>!v.isExternal)[0];
-  const currentTwd=parseFloat(lastVisit?.newTwd||lastVisit?.twd||0);
+  const currentTwd=lastVisit?.planAction==='refer_mopd' ? 0 : parseFloat(lastVisit?.newTwd||lastVisit?.twd||0);
+  if(lastVisit?.planAction==='refer_mopd') analysisLines.push('Referred to MOPD at the last review — warfarin regime to be decided by the doctor.');
   const rules=await getRules();
   const strengths=rules.tabletStrengths||DEFAULT_RULES.tabletStrengths;
   if(currentTwd>0){
