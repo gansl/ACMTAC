@@ -1497,24 +1497,31 @@ async function exportData(){
     visitsByPatient[p.id] = await fetchVisits(p.id);
   }
   const rules = await getRules();
-  const payload = {exportedAt: new Date().toISOString(), patients: allPatients, visitsByPatient, dosingRules: rules};
+  // Defaulter follow-up actions and Schedule session settings (raw rows). A missing
+  // table just yields an empty list so the rest of the backup still works.
+  let defaulterActions = [], clinicSessions = [];
+  try{ const r = await sb.from("defaulter_actions").select("*"); if(!r.error) defaulterActions = r.data||[]; }catch(e){}
+  try{ const r = await sb.from("clinic_sessions").select("*"); if(!r.error) clinicSessions = r.data||[]; }catch(e){}
+  const payload = {schemaVersion: 2, exportedAt: new Date().toISOString(), patients: allPatients, visitsByPatient, dosingRules: rules, defaulterActions, clinicSessions};
   const blob = new Blob([JSON.stringify(payload, null, 2)], {type:"application/json"});
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url; a.download = "inr-clinic-backup-"+localDateStr(new Date())+".json"; a.click();
   URL.revokeObjectURL(url);
+  showToast("Backup downloaded: "+allPatients.length+" patients, "+defaulterActions.length+" follow-up actions, "+clinicSessions.length+" session settings.","success",5000);
 }
 
 async function handleJsonImport(event){
   const file = event.target.files[0];
   if(!file) return;
   if(!configOk){ alert("Connect Supabase first."); event.target.value=""; return; }
-  if(!confirm("This will add or update patients and reviews from the backup file into the current database. Continue?")){ event.target.value=""; return; }
+  if(!confirm("This will add or update patients, reviews, defaulter follow-up actions and session settings from the backup file into the current database. Nothing is deleted. Continue?")){ event.target.value=""; return; }
 
   try{
     const text = await file.text();
     const payload = JSON.parse(text);
-    let patientsCount = 0, visitsCount = 0;
+    let patientsCount = 0, visitsCount = 0, actionsCount = 0, sessionsCount = 0;
+    const warnings = [];
 
     for(const p of (payload.patients||[])){
       await upsertPatientRow(p);
@@ -1530,13 +1537,31 @@ async function handleJsonImport(event){
       await saveRulesRow(payload.dosingRules);
       rulesCache = payload.dosingRules;
     }
+    // Follow-up actions (after patients, since they reference them) and session settings
+    async function upsertRaw(table, rows, conflict){
+      let ok = 0;
+      for(let i=0;i<rows.length;i+=100){
+        const chunk = rows.slice(i,i+100);
+        const {error} = await sb.from(table).upsert(chunk, {onConflict: conflict});
+        if(error){ warnings.push(table+": "+error.message); break; }
+        ok += chunk.length;
+      }
+      return ok;
+    }
+    if(Array.isArray(payload.defaulterActions) && payload.defaulterActions.length){
+      actionsCount = await upsertRaw("defaulter_actions", payload.defaulterActions, "id");
+    }
+    if(Array.isArray(payload.clinicSessions) && payload.clinicSessions.length){
+      sessionsCount = await upsertRaw("clinic_sessions", payload.clinicSessions, "session_date");
+      sessionConfigCache = null;
+    }
 
     visitsCache = {};
     patients = await fetchPatients();
     event.target.value = "";
     await renderPatientList();
     await renderMain();
-    alert("Import complete: "+patientsCount+" patient(s), "+visitsCount+" review(s) restored.");
+    alert("Import complete: "+patientsCount+" patient(s), "+visitsCount+" review(s), "+actionsCount+" follow-up action(s), "+sessionsCount+" session setting(s) restored."+(warnings.length?"\n\nSome items could not be restored:\n"+warnings.join("\n"):""));
   }catch(e){
     event.target.value = "";
     alert("Could not read that backup file: "+e.message);
@@ -4955,6 +4980,7 @@ async function renderAdminView(){
 
     '<div class="admin-section">'+
       '<h3>Data management</h3>'+
+      '<p style="font-size:13px;color:var(--ink-soft);margin:0 0 12px;">Backup file includes patients, all reviews (incl. external INR), dosing rules, defaulter follow-up actions and Schedule session settings. It does not include user accounts/roles or the audit log.</p>'+
       '<div style="display:flex;gap:10px;flex-wrap:wrap;">'+
         '<button class="btn btn-primary" onclick="exportData()" style="font-size:13px;">Export all data (JSON)</button>'+
         '<button class="btn" onclick="document.getElementById(\'jsonFile\').click()" style="font-size:13px;">Import data (JSON)</button>'+
