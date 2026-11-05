@@ -1757,11 +1757,6 @@ async function renderDashboard(){
     defaulterCardHtml = buildDefaulterCard(overdue, missingAppt);
   }catch(e){ defaulterCardHtml = errorCard("Defaulters","⚠️",e); }
 
-  // ── 3b. My patients today (reviewer's own saved reviews) ──
-  let myTodayCardHtml;
-  try{ myTodayCardHtml = buildMyPatientsTodayCard(); }
-  catch(e){ myTodayCardHtml = errorCard("My patients today","🩺",e); }
-
   // ── 4. TTR card ──
   let ttrCardHtml;
   try{ ttrCardHtml = buildTTRSummaryCard(); }
@@ -1782,7 +1777,6 @@ async function renderDashboard(){
       '<div class="dash-grid" id="dashGrid">'+
         patientsCardHtml+
         apptCardHtml+
-        myTodayCardHtml+
         defaulterCardHtml+
         ttrCardHtml+
         scheduleCardHtml+
@@ -1843,6 +1837,24 @@ function onDashSearch(q){
   }
 }
 
+// Who saved the review on a given date, and whether the signed-in user may see that.
+function reviewerOnDate(visits, dateStr){
+  const todays = (visits||[]).filter(v=>v.date===dateStr && !v.isExternal && v.reviewer);
+  if(!todays.length) return "";
+  todays.sort((a,b)=>String(b.updatedAt||"").localeCompare(String(a.updatedAt||"")));
+  return todays[0].reviewer;
+}
+function canSeeReviewer(name){
+  if(!name) return false;
+  if(currentUserRole==="admin") return true;
+  return name.trim().toLowerCase() === (currentReviewerName||"").trim().toLowerCase();
+}
+function apptStatusHtml(a){
+  if(!a.reviewed) return '<span class="dash-status-pending">⏳ Pending</span>';
+  const by = canSeeReviewer(a.reviewedBy) ? '<div style="font-size:10.5px; color:var(--ink-soft); margin-top:2px;">Reviewed by '+escapeHtml(a.reviewedBy)+'</div>' : '';
+  return '<div style="text-align:right;"><span class="dash-status-done">✓ Reviewed</span>'+by+'</div>';
+}
+
 async function buildApptCard(dateStr){
   const appts = [];
   // 1. Regular appointments from visit next_appt dates
@@ -1853,7 +1865,7 @@ async function buildApptCard(dateStr){
     if(!thisDateAppt.length) continue;
     const hasVisitToday = visits.some(v=>v.date===dateStr);
     const ttr = calcCurrentYearTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh), p.targetHistory);
-    appts.push({p, reviewed:hasVisitToday, ttr, inrDayBefore:thisDateAppt[0].inrDayBefore||false, isRescheduled:false});
+    appts.push({p, reviewed:hasVisitToday, reviewedBy:reviewerOnDate(visits, dateStr), ttr, inrDayBefore:thisDateAppt[0].inrDayBefore||false, isRescheduled:false});
   }
   // 2. Rescheduled defaulters with new_tca matching this date
   try{
@@ -1869,7 +1881,7 @@ async function buildApptCard(dateStr){
         const visits = await loadVisits(p.id);
         const hasVisitToday = visits.some(v=>v.date===dateStr);
         const ttr = calcCurrentYearTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh), p.targetHistory);
-        appts.push({p, reviewed:hasVisitToday, ttr, inrDayBefore:false, isRescheduled:true});
+        appts.push({p, reviewed:hasVisitToday, reviewedBy:reviewerOnDate(visits, dateStr), ttr, inrDayBefore:false, isRescheduled:true});
       }
     }
   }catch(e){ /* table may not exist yet */ }
@@ -1879,7 +1891,7 @@ async function buildApptCard(dateStr){
     if(appts.find(a=>a.p.id===p.id)) continue; // already in list (already reviewed at least once)
     const visits = await loadVisits(p.id);
     const hasVisitToday = visits.some(v=>v.date===dateStr);
-    appts.push({p, reviewed:hasVisitToday, ttr:null, inrDayBefore:false, isRescheduled:false, isFirstAppt:true});
+    appts.push({p, reviewed:hasVisitToday, reviewedBy:reviewerOnDate(visits, dateStr), ttr:null, inrDayBefore:false, isRescheduled:false, isFirstAppt:true});
   }
 
   appts.sort((a,b)=>a.p.name.localeCompare(b.p.name));
@@ -1889,7 +1901,7 @@ async function buildApptCard(dateStr){
         <div class="dash-appt-name" onclick="selectPatient('${a.p.id}')">${escapeHtml(a.p.name)}${a.isRescheduled?'<span class="tag" style="background:#EDF7ED;color:#2E7D32;margin-left:6px;">Rescheduled</span>':''}${a.isFirstAppt?'<span class="tag" style="background:#FEF3E7;color:#7A4A0A;margin-left:6px;">First appointment</span>':''}</div>
         <div class="dash-patient-meta">${escapeHtml(a.p.mrn)}${a.ttr!==null?' · TTR: '+a.ttr.toFixed(0)+'%':''}${a.inrDayBefore?' <span class="tag" style="background:#EDF3FB; color:#2C5A8C; margin-left:4px;">INR 1d before</span>':''}</div>
       </div>
-      ${a.reviewed?'<span class="dash-status-done">✓ Reviewed</span>':'<span class="dash-status-pending">⏳ Pending</span>'}
+      ${apptStatusHtml(a)}
     </div>`).join('');
   const apptCount=appts.length, pendingCount=appts.filter(a=>!a.reviewed).length;
   return `<div class="dash-card">
@@ -1923,7 +1935,7 @@ async function refreshApptCard(dateStr){
     if(!thisDateAppt.length) continue;
     const hasVisitToday = visits.some(v=>v.date===dateStr);
     const ttr = calcCurrentYearTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh), p.targetHistory);
-    appts.push({p, reviewed:hasVisitToday, ttr, inrDayBefore:thisDateAppt[0].inrDayBefore||false, isRescheduled:false});
+    appts.push({p, reviewed:hasVisitToday, reviewedBy:reviewerOnDate(visits, dateStr), ttr, inrDayBefore:thisDateAppt[0].inrDayBefore||false, isRescheduled:false});
   }
   // Rescheduled defaulters
   try{
@@ -1939,7 +1951,7 @@ async function refreshApptCard(dateStr){
         const visits = await loadVisits(p.id);
         const hasVisitToday = visits.some(v=>v.date===dateStr);
         const ttr = calcCurrentYearTTR(visits, parseFloat(p.targetLow), parseFloat(p.targetHigh), p.targetHistory);
-        appts.push({p, reviewed:hasVisitToday, ttr, inrDayBefore:false, isRescheduled:true});
+        appts.push({p, reviewed:hasVisitToday, reviewedBy:reviewerOnDate(visits, dateStr), ttr, inrDayBefore:false, isRescheduled:true});
       }
     }
   }catch(e){ /* ignore */ }
@@ -1949,7 +1961,7 @@ async function refreshApptCard(dateStr){
     if(appts.find(a=>a.p.id===p.id)) continue;
     const visits = await loadVisits(p.id);
     const hasVisitToday = visits.some(v=>v.date===dateStr);
-    appts.push({p, reviewed:hasVisitToday, ttr:null, inrDayBefore:false, isRescheduled:false, isFirstAppt:true});
+    appts.push({p, reviewed:hasVisitToday, reviewedBy:reviewerOnDate(visits, dateStr), ttr:null, inrDayBefore:false, isRescheduled:false, isFirstAppt:true});
   }
 
   appts.sort((a,b)=>a.p.name.localeCompare(b.p.name));
@@ -1959,7 +1971,7 @@ async function refreshApptCard(dateStr){
         <div class="dash-appt-name" onclick="selectPatient('${a.p.id}')">${escapeHtml(a.p.name)}${a.isRescheduled?'<span class="tag" style="background:#EDF7ED;color:#2E7D32;margin-left:6px;">Rescheduled</span>':''}${a.isFirstAppt?'<span class="tag" style="background:#FEF3E7;color:#7A4A0A;margin-left:6px;">First appointment</span>':''}</div>
         <div class="dash-patient-meta">${escapeHtml(a.p.mrn)}${a.ttr!==null?' · TTR: '+a.ttr.toFixed(0)+'%':''}${a.inrDayBefore?' <span class="tag" style="background:#EDF3FB; color:#2C5A8C; margin-left:4px;">INR 1d before</span>':''}</div>
       </div>
-      ${a.reviewed?'<span class="dash-status-done">✓ Reviewed</span>':'<span class="dash-status-pending">⏳ Pending</span>'}
+      ${apptStatusHtml(a)}
     </div>`).join('');
 
   listEl.innerHTML = rows || '<div class="dash-empty">No appointments on this date.</div>';
@@ -1967,49 +1979,6 @@ async function refreshApptCard(dateStr){
     const p2=appts.length, pe=appts.filter(a=>!a.reviewed).length;
     countEl.textContent=p2+' patient'+(p2!==1?'s':'')+' · '+pe+' pending';
   }
-}
-
-// "My patients today" — the patients the signed-in reviewer has already saved a
-// review for today (matched on the reviewer name stored with each review).
-function buildMyPatientsTodayCard(){
-  const today = localDateStr(new Date());
-  const me = (currentReviewerName||"").trim().toLowerCase();
-  const PLAN = {continue:"Continue dose", load:"Load dose", withhold:"Withhold dose", refer_mopd:"Refer MOPD", increase:"Increase dose", reduce:"Reduce dose"};
-  const mine = [];
-  if(me){
-    for(const p of patients){
-      const todays = (visitsCache[p.id]||[]).filter(v=>v.date===today && !v.isExternal && (v.reviewer||"").trim().toLowerCase()===me);
-      if(!todays.length) continue;
-      todays.sort((a,b)=>String(b.updatedAt||"").localeCompare(String(a.updatedAt||"")));
-      mine.push({p, v:todays[0]});
-    }
-    mine.sort((a,b)=>String(b.v.updatedAt||"").localeCompare(String(a.v.updatedAt||"")));
-  }
-  const rows = mine.map(({p,v})=>{
-    const t = v.updatedAt ? new Date(v.updatedAt) : null;
-    const time = (t && !isNaN(t)) ? String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0') : '';
-    const meta = [escapeHtml(p.mrn), v.inr!=null&&v.inr!==''?'INR '+escapeHtml(String(v.inr)):'', v.planAction?escapeHtml(PLAN[v.planAction]||v.planAction):'', v.nextAppt?'Next '+escapeHtml(v.nextAppt):''].filter(Boolean).join(' · ');
-    return `<div class="dash-appt-row" style="cursor:pointer;" onclick="selectPatient('${p.id}')">
-      <div>
-        <div class="dash-appt-name">${escapeHtml(p.name)}</div>
-        <div class="dash-patient-meta">${meta}</div>
-      </div>
-      ${time?`<span style="font-size:11.5px; color:var(--ink-soft);">${time}</span>`:'<span class="dash-status-done">✓</span>'}
-    </div>`;
-  }).join('');
-  const empty = !me
-    ? '<div class="dash-empty">Set your display name to track your own reviews here.</div>'
-    : '<div class="dash-empty">You haven\'t saved any reviews today yet.</div>';
-  return `<div class="dash-card">
-    <div class="dash-card-header">
-      <div class="dash-card-title">My patients today <span style="background:#EDF7ED;color:#2E7D32;border-radius:20px;padding:1px 8px;font-size:11px;font-weight:700;margin-left:4px;">${mine.length}</span></div>
-      <div class="dash-card-icon" style="background:#EFF8F5;">🩺</div>
-    </div>
-    <div class="dash-card-body">
-      ${rows || empty}
-      <div class="hint" style="margin-top:8px;">Patients you reviewed today, from your saved reviews.</div>
-    </div>
-  </div>`;
 }
 
 function buildDefaulterCard(overdue, missingAppt){
