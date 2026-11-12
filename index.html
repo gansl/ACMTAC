@@ -116,6 +116,8 @@
   .dash-appt-row.full *{color:#fff!important;}
   .dash-appt-row.warn{background:#F1C40F; border-color:#D4AC0D; color:#1a1a1a;}
   .dash-appt-row.warn *{color:#1a1a1a!important;}
+  .dash-appt-row.closed{background:#E5E1D5; border-color:#B9B3A0; color:#5b5648;}
+  .dash-appt-row.closed *{color:#5b5648!important;}
   .dash-appt-name{font-size:13px; font-weight:600; color:var(--ink); cursor:pointer;}
   .dash-appt-name:hover{color:var(--accent);}
   .dash-status-done{display:inline-flex; align-items:center; gap:4px; font-size:11.5px; font-weight:600; color:var(--good); background:var(--good-soft); padding:2px 8px; border-radius:20px;}
@@ -142,6 +144,8 @@
   .sched-box.warn{background:#F1C40F; border-color:#D4AC0D; color:#1a1a1a;}
   .sched-box.warn *{color:#1a1a1a!important;}
   .sched-box.ok{background:var(--card);}
+  .sched-box.closed{background:repeating-linear-gradient(45deg,#ECE8DD,#ECE8DD 10px,#E2DDCF 10px,#E2DDCF 20px); border-color:#B9B3A0; color:#5b5648;}
+  .sched-box.closed .sched-count{font-size:14px;}
   .sched-date{font-size:16px; font-weight:700; margin-bottom:6px;}
   .sched-note{font-size:11.5px; font-weight:600; margin-bottom:8px; min-height:16px;}
   .sched-note.nephro{color:#27AE60;}
@@ -591,7 +595,7 @@
 <div class="modal-bg" id="sessionPlanModal">
   <div class="modal" style="width:760px; max-width:96vw; max-height:90vh; display:flex; flex-direction:column; overflow:hidden;">
     <h3 style="margin-bottom:4px;">Plan the next 6 months of Thursdays</h3>
-    <p class="hint" style="margin:0 0 10px;">Set the maximum patients and any special note for each clinic day in advance. Dates you leave at 30 with no note aren't stored. Later dates keep these presets until they appear in the 12-week view, and they also drive the "date is nearly full" warning when booking appointments.</p>
+    <p class="hint" style="margin:0 0 10px;">Set the maximum patients and any special note for each clinic day in advance, and tick <b>Closed</b> for days the clinic doesn't run — reviewers can't book appointments on closed dates. Dates you leave at 30 with no note aren't stored. Later dates keep these presets until they appear in the 12-week view, and they also drive the "date is nearly full" warning when booking appointments.</p>
     <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
       <label style="font-size:12.5px;">Set max patients for all dates:</label>
       <input id="sp_default_max" type="number" min="1" step="1" value="30" style="width:80px; padding:6px 8px; border:1px solid var(--line); border-radius:7px;">
@@ -1515,6 +1519,7 @@ async function createPatient(){
   const mrn = document.getElementById("np_mrn").value.trim();
   const firstAppt = document.getElementById("np_first_appt").value || "";
   if(!name || !mrn){ alert("Enter both name and MRN."); return; }
+  if(firstAppt && !(await guardClosedDate(firstAppt))) return;
   const id = "p_"+Date.now()+"_"+Math.random().toString(36).slice(2,7);
   const patient = {id, name, mrn, phone:"", indication:"", targetLow:2, targetHigh:3, duration:"", isActive:true, ttrExcluded:false, ttrExcludeReason:"", pendingFirstAppt:firstAppt};
   patients.push(patient);
@@ -2107,12 +2112,13 @@ async function buildScheduleSummaryCard(){
     const count = countByDate[dateStr]||0;
     const max = cfg.maxPatients||30;
     const pct = count/max;
-    const rowClass = pct>=1?'full':pct>=0.9?'warn':'';
+    const closed = !!cfg.isClosed;
+    const rowClass = closed ? 'closed' : (pct>=1?'full':pct>=0.9?'warn':'');
     const noteTag = cfg.notes ? `<span class="tag" style="background:#FEF3E7;color:#7A4A0A;margin-left:6px;">${escapeHtml(cfg.notes)}</span>` : '';
     return `<div class="dash-appt-row ${rowClass}" style="cursor:pointer;" onclick="filterApptByDate('${dateStr}')">
       <div>
         <div class="dash-appt-name">${displayDate}${noteTag}</div>
-        <div class="dash-patient-meta">${count} / ${max} patients booked</div>
+        <div class="dash-patient-meta">${closed ? '🚫 Clinic closed'+(count>0?' — '+count+' already booked':'') : count+' / '+max+' patients booked'}</div>
       </div>
     </div>`;
   }).join('');
@@ -2574,6 +2580,8 @@ async function saveProfile(){
   const nameEl = document.getElementById("pf_name");
   const mrnEl = document.getElementById("pf_mrn");
   if(!nameEl || !mrnEl){ showToast("Profile form not found — try reloading the patient","error"); return; }
+  const newFirstAppt = document.getElementById("pf_pendingFirstAppt").value || "";
+  if(newFirstAppt && newFirstAppt !== (p.pendingFirstAppt||"") && !(await guardClosedDate(newFirstAppt))) return;
   const oldLow = parseFloat(p.targetLow), oldHigh = parseFloat(p.targetHigh);
   const parsedLow = parseFloat(document.getElementById("pf_targetLow").value);
   const parsedHigh = parseFloat(document.getElementById("pf_targetHigh").value);
@@ -2931,6 +2939,31 @@ async function onNewTwdChange(){
 let editingVisitId = null;
 
 // ── Warn reviewer if the chosen next-appointment date is near/at clinic capacity ──
+// ── Clinic closed days ──
+function fmtDMY(dateStr){ const [y,m,d] = String(dateStr).split('-'); return d+'/'+m+'/'+y; }
+// Fresh lookup (not the cache) so a closure set by an admin moments ago is respected.
+async function getClosedInfo(dateStr){
+  try{
+    const {data, error} = await sb.from("clinic_sessions").select("*").eq("session_date", dateStr).maybeSingle();
+    if(!error) return {closed: !!(data && data.is_closed), notes: (data && data.notes) || ""};
+  }catch(e){}
+  const cfg = (await fetchSessionConfigs())[dateStr];
+  return {closed: !!(cfg && cfg.isClosed), notes: (cfg && cfg.notes) || ""};
+}
+// Returns true if booking this date may proceed. Reviewers are blocked outright;
+// admins (who set the closure) get a confirmation.
+async function guardClosedDate(dateStr){
+  if(!dateStr) return true;
+  const info = await getClosedInfo(dateStr);
+  if(!info.closed) return true;
+  const reason = info.notes ? " ("+info.notes+")" : "";
+  if(currentUserRole==="admin"){
+    return confirm("The clinic is marked CLOSED on "+fmtDMY(dateStr)+reason+".\n\nBook this date anyway?");
+  }
+  showToast("The clinic is closed on "+fmtDMY(dateStr)+reason+". Please choose another date.","error",6000);
+  return false;
+}
+
 async function checkAppointmentCapacity(dateStr){
   const box = document.getElementById("apptCapacityWarning");
   if(!box) return;
@@ -2938,6 +2971,18 @@ async function checkAppointmentCapacity(dateStr){
   box.innerHTML = '<div class="hint" style="margin-top:8px;">Checking clinic capacity…</div>';
   try{
     const {sessionConfigs, countByDate} = await getScheduleCounts();
+    const closedCfg = sessionConfigs[dateStr];
+    if(closedCfg && closedCfg.isClosed){
+      const isAdmin = currentUserRole==="admin";
+      const why = closedCfg.notes ? " ("+escapeHtml(closedCfg.notes)+")" : "";
+      box.innerHTML = '<div class="flag" style="margin-top:8px; background:#FDECEA; border-color:#E8A79A; color:#8C2E1E;">'+
+        '<b>🚫 The clinic is CLOSED on '+fmtDMY(dateStr)+why+'.</b> '+
+        (isAdmin ? 'As an admin you can still book it, but you will be asked to confirm.' : 'This date can\'t be booked — please choose another date.')+
+        '</div>';
+      showToast("The clinic is closed on "+fmtDMY(dateStr)+".","error",6000);
+      if(!isAdmin){ const inp = document.getElementById("rv_next_appt"); if(inp) inp.value = ""; }
+      return;
+    }
     const existing = countByDate[dateStr] || 0;
     // +1 for the patient currently being booked into this date
     const projected = existing + 1;
@@ -3013,6 +3058,15 @@ async function saveReview(){
   if(errors.length > 0){
     errors.forEach((e,i) => setTimeout(()=>showToast(e,"error",5000), i*300));
     return;
+  }
+
+  // Closed clinic day: block reviewers (admins confirm). Skipped when editing a review
+  // whose appointment date isn't being changed.
+  if(nextAppt){
+    const prevVisit = editingVisitId ? (visitsCache[currentPatientId]||[]).find(v=>v.id===editingVisitId) : null;
+    if(!prevVisit || prevVisit.nextAppt !== nextAppt){
+      if(!(await guardClosedDate(nextAppt))) return;
+    }
   }
 
   // ── Collect data ──
@@ -3243,6 +3297,11 @@ async function saveReschedule(){
   const visits = visitsCache[currentPatientId]||[];
   const visit = visits.find(v=>v.id===rescheduleVisitId);
   if(!visit){ errBox.innerText = "Could not find the visit to update — please reopen this dialog."; return; }
+
+  if(newDate !== visit.nextAppt && !(await guardClosedDate(newDate))){
+    errBox.innerText = "The clinic is closed on that date — choose another date.";
+    return;
+  }
 
   const oldDate = visit.nextAppt || "(none)";
   const previousNextAppt = visit.nextAppt;
@@ -3797,6 +3856,7 @@ async function saveDAction(patientId, missedDate, key){
     showToast("Please enter the new TCA date for rescheduled patient.","error",4000);
     return;
   }
+  if(newTca && !(await guardClosedDate(newTca))) return;
   await saveDefaulterAction(patientId, missedDate, action, notes, false, newTca);
 }
 
@@ -4849,7 +4909,7 @@ async function fetchSessionConfigs(){
   try{
     const {data} = await sb.from("clinic_sessions").select("*");
     const map = {};
-    (data||[]).forEach(r=>{ map[r.session_date]={maxPatients:r.max_patients||30, notes:r.notes||"", noInrDay:r.no_inr_day||false}; });
+    (data||[]).forEach(r=>{ map[r.session_date]={maxPatients:r.max_patients||30, notes:r.notes||"", noInrDay:r.no_inr_day||false, isClosed:r.is_closed||false}; });
     sessionConfigCache = map;
     return map;
   }catch(e){ return {}; }
@@ -4921,7 +4981,8 @@ async function renderScheduleView(){
     const count = countByDate[dateStr]||0;
     const max = cfg.maxPatients||30;
     const pct = count/max;
-    const boxClass = pct>=1?"full":pct>=0.9?"warn":"ok";
+    const closed = !!cfg.isClosed;
+    const boxClass = closed ? "closed" : (pct>=1?"full":pct>=0.9?"warn":"ok");
     const noteHtml = cfg.notes
       ? `<div class="sched-note ${cfg.notes.toLowerCase().includes('nephro')?'nephro':'noinr'}">${escapeHtml(cfg.notes)}</div>`
       : `<div class="sched-note"></div>`;
@@ -4929,7 +4990,7 @@ async function renderScheduleView(){
     return `<div class="sched-box ${boxClass}" onclick="filterApptByDate('${dateStr}')">
       <div class="sched-date">${displayDate}</div>
       ${noteHtml}
-      <div class="sched-count">${count} / (Max ${max} patients)</div>
+      ${closed ? `<div class="sched-count">🚫 CLOSED</div>${count>0?`<div style="font-size:11.5px; font-weight:700; color:#C0392B; margin-top:4px;">⚠ ${count} already booked</div>`:''}` : `<div class="sched-count">${count} / (Max ${max} patients)</div>`}
       ${editBtn}
     </div>`;
   }).join('');
@@ -4970,13 +5031,13 @@ async function openSessionPlanner(){
   const first = getNext12Thursdays()[0];
   const end = new Date(); end.setHours(0,0,0,0); end.setMonth(end.getMonth()+6);
   _spDates = []; _spOriginal = {};
-  let html = '<table class="ttr-table" style="margin:0; min-width:520px;"><thead><tr><th style="width:120px;">Date</th><th style="width:110px;">Max patients</th><th>Special note</th><th style="width:80px;">Booked</th></tr></thead><tbody>';
+  let html = '<table class="ttr-table" style="margin:0; min-width:520px;"><thead><tr><th style="width:110px;">Date</th><th style="width:70px; text-align:center;">Closed</th><th style="width:100px;">Max patients</th><th>Special note</th><th style="width:70px;">Booked</th></tr></thead><tbody>';
   let lastMonth = "";
   for(let d = new Date(first); d <= end; d.setDate(d.getDate()+7)){
     const dateStr = localDateStr(d);
     const monthLabel = d.toLocaleDateString('en-GB',{month:'long', year:'numeric'});
     if(monthLabel !== lastMonth){
-      html += '<tr><td colspan="4" style="background:#F0EDE4; font-weight:700; font-size:12px; padding:6px 10px;">'+monthLabel+'</td></tr>';
+      html += '<tr><td colspan="5" style="background:#F0EDE4; font-weight:700; font-size:12px; padding:6px 10px;">'+monthLabel+'</td></tr>';
       lastMonth = monthLabel;
     }
     const cfg = sessionConfigs[dateStr];
@@ -4984,13 +5045,15 @@ async function openSessionPlanner(){
     const notes = cfg ? (cfg.notes||"") : "";
     const booked = countByDate[dateStr]||0;
     _spDates.push(dateStr);
-    _spOriginal[dateStr] = {exists:!!cfg, max, notes, noInrDay: cfg ? !!cfg.noInrDay : false};
+    const closed = cfg ? !!cfg.isClosed : false;
+    _spOriginal[dateStr] = {exists:!!cfg, max, notes, noInrDay: cfg ? !!cfg.noInrDay : false, closed, booked};
     const dd = String(d.getDate()).padStart(2,'0'), mm = String(d.getMonth()+1).padStart(2,'0');
-    html += '<tr>'+
+    html += '<tr id="sp_row_'+dateStr+'"'+(closed?' style="background:#EFEBE0;"':'')+'>'+
       '<td style="font-size:12.5px; white-space:nowrap;">'+dd+'/'+mm+'/'+d.getFullYear()+'</td>'+
+      '<td style="text-align:center;"><input type="checkbox" id="sp_closed_'+dateStr+'" '+(closed?'checked':'')+' onchange="spClosedChanged(\''+dateStr+'\')" title="Clinic closed on this date" style="width:16px; height:16px; cursor:pointer;"></td>'+
       '<td><input id="sp_max_'+dateStr+'" type="number" min="1" step="1" value="'+max+'" style="width:80px; padding:5px 7px; border:1px solid var(--line); border-radius:6px;"></td>'+
       '<td><input id="sp_note_'+dateStr+'" type="text" value="'+escapeHtml(notes)+'" placeholder="e.g. Nephro Clinic, NO INR 1 day before" style="width:100%; padding:5px 7px; border:1px solid var(--line); border-radius:6px; font-size:12.5px;"></td>'+
-      '<td style="font-size:12px; color:var(--ink-soft);">'+booked+'</td>'+
+      '<td id="sp_booked_'+dateStr+'" style="font-size:12px; color:'+(closed&&booked>0?'#C0392B':'var(--ink-soft)')+';'+(closed&&booked>0?' font-weight:700;':'')+'">'+booked+'</td>'+
     '</tr>';
   }
   html += '</tbody></table>';
@@ -4998,6 +5061,14 @@ async function openSessionPlanner(){
   document.getElementById("spError").innerText = "";
   document.getElementById("sp_default_max").value = 30;
   document.getElementById("sessionPlanModal").classList.add("show");
+}
+function spClosedChanged(ds){
+  const closed = document.getElementById("sp_closed_"+ds).checked;
+  const booked = _spOriginal[ds].booked;
+  const row = document.getElementById("sp_row_"+ds);
+  const cell = document.getElementById("sp_booked_"+ds);
+  if(row) row.style.background = closed ? "#EFEBE0" : "";
+  if(cell){ const warn = closed && booked>0; cell.style.color = warn ? "#C0392B" : "var(--ink-soft)"; cell.style.fontWeight = warn ? "700" : ""; }
 }
 function closeSessionPlanner(){ document.getElementById("sessionPlanModal").classList.remove("show"); }
 function applyDefaultMaxToAll(){
@@ -5015,10 +5086,18 @@ async function saveSessionPlan(){
     const max = parseInt(document.getElementById("sp_max_"+ds).value, 10);
     if(isNaN(max) || max < 1){ errBox.innerText = "Max patients must be a whole number of 1 or more (check "+ds+")."; return; }
     const notes = document.getElementById("sp_note_"+ds).value.trim();
+    const closed = document.getElementById("sp_closed_"+ds).checked;
     const orig = _spOriginal[ds];
-    if(!orig.exists && max === 30 && notes === "") continue;       // still the default — nothing to store
-    if(orig.exists && max === orig.max && notes === orig.notes) continue; // unchanged
-    payload.push({session_date:ds, max_patients:max, notes, no_inr_day:orig.noInrDay});
+    if(!orig.exists && max === 30 && notes === "" && !closed) continue;                          // still the default — nothing to store
+    if(orig.exists && max === orig.max && notes === orig.notes && closed === orig.closed) continue; // unchanged
+    const row = {session_date:ds, max_patients:max, notes, no_inr_day:orig.noInrDay};
+    if(closed || orig.closed) row.is_closed = closed;   // only touch the column when it's in use
+    payload.push(row);
+  }
+  const conflicts = payload.filter(r=>r.is_closed && !_spOriginal[r.session_date].closed && _spOriginal[r.session_date].booked>0);
+  if(conflicts.length){
+    const list = conflicts.map(r=>fmtDMY(r.session_date)+" ("+_spOriginal[r.session_date].booked+" booked)").join("\n");
+    if(!confirm("These dates are being closed but already have patients booked:\n\n"+list+"\n\nThose patients will need to be rescheduled. Save anyway?")) return;
   }
   if(!payload.length){ closeSessionPlanner(); showToast("No changes to save.","info",2500); return; }
   const btn = document.getElementById("spSaveBtn");
