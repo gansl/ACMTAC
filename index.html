@@ -262,6 +262,16 @@
   .logout-row{display:flex; justify-content:space-between; align-items:center; margin-top:auto; padding-top:14px; border-top:1px solid #2C3C57;}
   .logout-row span{font-size:12px; color:#9AA6BC; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:170px;}
   .logout-link{font-size:12px; color:#D98A7E; cursor:pointer; font-weight:600;}
+  /* Offline read-only viewer: hide controls that would change data */
+  body.offline #navSettings, body.offline #navAdmin{display:none!important;}
+  body.offline [onclick*="openNewPatientModal"], body.offline [onclick*="openNewPatientFromSearch"],
+  body.offline [onclick*="openExternalInrModal"], body.offline [onclick*="openRescheduleModal"],
+  body.offline [onclick*="deleteReview"], body.offline [onclick*="editReview"], body.offline [onclick*="deletePatient"],
+  body.offline [onclick*="saveProfile"], body.offline [onclick*="savePassoverNotes"], body.offline [onclick*="togglePassoverEdit"],
+  body.offline [onclick*="addMedication"], body.offline [onclick*="removeMedication"], body.offline [onclick*="saveDAction"],
+  body.offline [onclick*="resolveDAction"], body.offline [onclick*="saveDoacNote"], body.offline [onclick*="editSession"],
+  body.offline [onclick*="quickExcludeFromTTR"], body.offline [onclick*="saveReview"], body.offline [onclick*="jsonFile"],
+  body.offline [onclick*="promptChangeName"], body.offline [data-tab="review"], body.offline [data-tab="audit"]{display:none!important;}
   /* Toast notifications */
   .toast-container{position:fixed; bottom:24px; right:24px; z-index:200; display:flex; flex-direction:column; gap:8px; max-width:360px;}
   .toast{padding:12px 16px; border-radius:9px; font-size:13px; font-weight:500; line-height:1.4; animation:slideIn 0.2s ease; box-shadow:0 4px 16px rgba(0,0,0,0.15);}
@@ -417,6 +427,10 @@
 </svg>
 
 <div class="app" id="appRoot" style="display:none;">
+  <div id="offlineBanner" style="display:none; position:sticky; top:0; z-index:70; background:#8A5A00; color:#fff; padding:8px 16px; font-size:12.5px; align-items:center; gap:12px; flex-wrap:wrap;">
+    <span><b>📴 Offline backup — read only.</b> <span id="offlineBannerInfo"></span> Changes are disabled.</span>
+    <button class="btn" style="margin-left:auto; padding:3px 12px; font-size:12px;" onclick="location.reload()">Close backup</button>
+  </div>
   <!-- Desktop top navigation bar -->
   <div class="desktop-topbar" id="desktopTopbar">
     <span class="brand" onclick="goHome()" style="cursor:pointer;">INR<span>Clinic</span></span>
@@ -513,6 +527,10 @@
     <div class="row-actions" style="margin-top:10px;"><button class="btn btn-primary" style="width:100%;" id="loginBtn" onclick="login()">Sign in</button></div>
     <p style="text-align:center; margin-top:10px;"><a href="#" style="font-size:12.5px; color:var(--ink-soft);" onclick="event.preventDefault(); openForgotPasswordModal()">Forgot password?</a></p>
     <p class="hint" style="margin-top:14px;">Access is by invitation only. Ask your administrator to add your email in Supabase &gt; Authentication &gt; Users.</p>
+    <div style="border-top:1px solid var(--line); margin:16px 0 12px;"></div>
+    <button class="btn" style="width:100%;" onclick="document.getElementById('offlineFile').click()">📴 Open a backup file offline (read-only)</button>
+    <input type="file" id="offlineFile" accept=".json,application/json" style="display:none" onchange="openOfflineBackup(event)">
+    <p class="hint" style="margin-top:8px;">No internet or sign-in needed. View only — nothing can be changed. Anyone holding a backup file can read the patient data in it, so keep it secure.</p>
   </div>
 </div>
 
@@ -682,6 +700,7 @@ async function login(){
   const btn = document.getElementById("loginBtn");
   errBox.innerText = "";
   if(!email || !password){ errBox.innerText = "Enter your email and password."; return; }
+  if(!sb){ errBox.innerText = "Can't sign in without an internet connection. Use the offline backup option below."; return; }
   btn.disabled = true; btn.innerText = "Signing in...";
   const {data, error} = await sb.auth.signInWithPassword({email, password});
   btn.disabled = false; btn.innerText = "Sign in";
@@ -2058,7 +2077,7 @@ function buildTTRSummaryCard(){
 
 async function buildScheduleSummaryCard(){
   const {sessionConfigs, countByDate} = await getScheduleCounts();
-  const thursdays = getNext12Thursdays().slice(0,4);
+  const thursdays = getNext12Thursdays();
 
   const rows = thursdays.map(d=>{
     const dateStr = localDateStr(d);
@@ -2086,8 +2105,8 @@ async function buildScheduleSummaryCard(){
       <div class="dash-card-icon" style="background:#F5EFFB;">🗓️</div>
     </div>
     <div class="dash-card-body">
-      ${rows || '<div class="dash-empty">No upcoming Thursdays configured.</div>'}
-      <span class="dash-viewall" onclick="switchView('schedule')">View full 12-week schedule →</span>
+      ${rows ? '<div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:0 8px;">'+rows+'</div>' : '<div class="dash-empty">No upcoming Thursdays configured.</div>'}
+      <span class="dash-viewall" onclick="switchView('schedule')">Open full schedule →</span>
     </div>
   </div>`;
 }
@@ -4980,7 +4999,7 @@ async function renderAdminView(){
 
     '<div class="admin-section">'+
       '<h3>Data management</h3>'+
-      '<p style="font-size:13px;color:var(--ink-soft);margin:0 0 12px;">Backup file includes patients, all reviews (incl. external INR), dosing rules, defaulter follow-up actions and Schedule session settings. It does not include user accounts/roles or the audit log.</p>'+
+      '<p style="font-size:13px;color:var(--ink-soft);margin:0 0 12px;">Backup file includes patients, all reviews (incl. external INR), dosing rules, defaulter follow-up actions and Schedule session settings. It does not include user accounts/roles or the audit log. To view a backup without internet, open a saved copy of this app file and choose "Open a backup file offline" on the sign-in page (read-only).</p>'+
       '<div style="display:flex;gap:10px;flex-wrap:wrap;">'+
         '<button class="btn btn-primary" onclick="exportData()" style="font-size:13px;">Export all data (JSON)</button>'+
         '<button class="btn" onclick="document.getElementById(\'jsonFile\').click()" style="font-size:13px;">Import data (JSON)</button>'+
@@ -5084,7 +5103,141 @@ async function saveRulesClick(){
 }
 
 // ---------- init ----------
+// ═══════════ Offline read-only viewer ═══════════
+// Loads a JSON backup into an in-memory stand-in for the database, so the normal
+// screens (dashboard, patients, TTR, schedule, defaulters, reports) work with no
+// internet and no sign-in. Every write is blocked.
+let OFFLINE_MODE = false;
+function makeOfflineSb(tables){
+  const READ_ONLY = {message:"Offline read-only mode — changes are disabled."};
+  function builder(table){
+    const st = {filters:[], order:null, limit:null, single:false, maybe:false, write:false, head:false};
+    const b = {
+      select(cols, opts){ if(opts && opts.head) st.head = true; return b; },
+      eq(col, val){ st.filters.push(r=>r[col]===val); return b; },
+      in(col, vals){ st.filters.push(r=>vals.includes(r[col])); return b; },
+      not(col, op, val){ if(op==="is") st.filters.push(r=> val===null ? r[col]!=null : r[col]!==val); return b; },
+      order(col, o){ st.order = {col, asc: !(o && o.ascending===false)}; return b; },
+      limit(n){ st.limit = n; return b; },
+      single(){ st.single = true; return b; },
+      maybeSingle(){ st.maybe = true; return b; },
+      insert(){ st.write = true; return b; },
+      upsert(){ st.write = true; return b; },
+      update(){ st.write = true; return b; },
+      delete(){ st.write = true; return b; },
+      then(resolve, reject){ return Promise.resolve(run()).then(resolve, reject); }
+    };
+    function run(){
+      if(st.write) return {data:null, error:READ_ONLY};
+      let rows = (tables[table]||[]).filter(r=>st.filters.every(f=>f(r)));
+      if(st.order){
+        const {col, asc} = st.order;
+        rows = [...rows].sort((a,b)=>{
+          const x=a[col], y=b[col];
+          if(x==null && y==null) return 0;
+          if(x==null) return 1;
+          if(y==null) return -1;
+          return (x<y?-1:x>y?1:0) * (asc?1:-1);
+        });
+      }
+      if(st.limit!=null) rows = rows.slice(0, st.limit);
+      if(st.head) return {data:null, count:rows.length, error:null};
+      if(st.single) return rows.length===1 ? {data:rows[0], error:null} : {data:null, error:{message:"Row not found"}};
+      if(st.maybe) return {data:rows[0]||null, error:null};
+      return {data:rows, error:null};
+    }
+    return b;
+  }
+  const noopChannel = {on(){ return noopChannel; }, subscribe(){ return noopChannel; }};
+  return {
+    from: builder,
+    channel(){ return noopChannel; },
+    removeChannel(){},
+    auth: {
+      getSession: async()=>({data:{session:null}}),
+      signOut: async()=>{},
+      updateUser: async()=>({data:null, error:READ_ONLY}),
+      onAuthStateChange(){ return {data:{subscription:{unsubscribe(){}}}}; }
+    }
+  };
+}
+
+// User-facing actions that would change data — replaced with a friendly "read-only" message.
+const OFFLINE_BLOCKED_ACTIONS = [
+  "openNewPatientModal","openNewPatientFromSearch","createPatient","handleJsonImport","handleCsvImport",
+  "saveProfile","deletePatient","saveReview","editReview","openExternalInrModal","saveExternalInr",
+  "openRescheduleModal","saveReschedule","deleteReview","toggleActive","toggleTTRExclude","quickExcludeFromTTR",
+  "saveDAction","resolveDAction","saveDoacNote","savePassoverNotes","togglePassoverEdit","addMedication",
+  "removeMedication","editSession","toggleUserRole","saveRulesClick","addTier","removeTier","promptChangeName","saveFullName"
+];
+function offlineBlocked(){
+  showToast("Read-only offline view — changes are disabled.","error",3000);
+  return false;
+}
+
+async function openOfflineBackup(event){
+  const file = event.target.files[0];
+  if(!file) return;
+  const errBox = document.getElementById("loginError");
+  errBox.innerText = "";
+  try{
+    const payload = JSON.parse(await file.text());
+    if(!payload || !Array.isArray(payload.patients) || typeof payload.visitsByPatient !== "object" || payload.visitsByPatient===null){
+      throw new Error("this doesn't look like an INR Clinic backup file.");
+    }
+    event.target.value = "";
+    await enterOfflineMode(payload, file.name);
+  }catch(e){
+    event.target.value = "";
+    errBox.innerText = "Could not open that file: "+e.message;
+  }
+}
+
+async function enterOfflineMode(payload, fileName){
+  const patientRows = payload.patients.map(p=>patientToRow(p));
+  const visitRows = [];
+  for(const [pid, vs] of Object.entries(payload.visitsByPatient||{})){
+    for(const v of (vs||[])) visitRows.push({...visitToRow(v, pid), updated_at: v.updatedAt||null});
+  }
+  sb = makeOfflineSb({
+    patients: patientRows,
+    visits: visitRows,
+    dosing_rules: payload.dosingRules ? [{id:1, rules:payload.dosingRules}] : [],
+    defaulter_actions: payload.defaulterActions||[],
+    clinic_sessions: payload.clinicSessions||[],
+    audit_log: [], user_roles: []
+  });
+  OFFLINE_MODE = true; configOk = true;
+  visitsCache = {}; rulesCache = null; sessionConfigCache = null;
+  Object.keys(ttrCache).forEach(k=>delete ttrCache[k]);
+  currentSession = null; currentUserRole = "admin"; currentReviewerName = "Offline viewer";
+
+  OFFLINE_BLOCKED_ACTIONS.forEach(n=>{ window[n] = offlineBlocked; });
+  window.logout = ()=>location.reload();
+
+  document.body.classList.add("offline");
+  document.getElementById("loginScreen").style.display = "none";
+  const exported = payload.exportedAt ? new Date(payload.exportedAt).toLocaleString() : "date unknown";
+  document.getElementById("offlineBannerInfo").innerText = "Backup from "+exported+" · "+payload.patients.length+" patients · file: "+fileName+".";
+  document.getElementById("offlineBanner").style.display = "flex";
+  document.getElementById("appRoot").style.display = "flex";
+  ["sessionEmail","sessionEmailMobile"].forEach(id=>{ const el=document.getElementById(id); if(el) el.innerText = "Offline viewer"; });
+  applyRoleUI();
+  setDbStatus(null, "Offline backup");
+
+  patients = await fetchPatients();
+  await renderPatientList();
+  await renderMain();
+}
+
 async function init(){
+  // No internet (or the online library is blocked): offer the offline backup viewer
+  if(typeof window.supabase === "undefined"){
+    showLoginScreen();
+    const eb = document.getElementById("loginError");
+    if(eb) eb.innerText = "Can't reach the online service (no internet?). You can still open a backup file below.";
+    return;
+  }
   initSupabase();
   if(!configOk){
     document.getElementById("loginScreen").style.display = "none";
