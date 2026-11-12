@@ -269,7 +269,7 @@
   body.offline [onclick*="deleteReview"], body.offline [onclick*="editReview"], body.offline [onclick*="deletePatient"],
   body.offline [onclick*="saveProfile"], body.offline [onclick*="savePassoverNotes"], body.offline [onclick*="togglePassoverEdit"],
   body.offline [onclick*="addMedication"], body.offline [onclick*="removeMedication"], body.offline [onclick*="saveDAction"],
-  body.offline [onclick*="resolveDAction"], body.offline [onclick*="saveDoacNote"], body.offline [onclick*="editSession"],
+  body.offline [onclick*="resolveDAction"], body.offline [onclick*="saveDoacNote"], body.offline [onclick*="editSession"], body.offline [onclick*="openSessionPlanner"],
   body.offline [onclick*="quickExcludeFromTTR"], body.offline [onclick*="saveReview"], body.offline [onclick*="jsonFile"],
   body.offline [onclick*="promptChangeName"], body.offline [data-tab="review"], body.offline [data-tab="audit"]{display:none!important;}
   /* Toast notifications */
@@ -584,6 +584,24 @@
     <div class="row-actions" style="margin-top:10px;">
       <button class="btn" onclick="closeExternalInrModal()">Cancel</button>
       <button class="btn btn-primary" onclick="saveExternalInr()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="sessionPlanModal">
+  <div class="modal" style="width:760px; max-width:96vw; max-height:90vh; display:flex; flex-direction:column; overflow:hidden;">
+    <h3 style="margin-bottom:4px;">Plan the next 6 months of Thursdays</h3>
+    <p class="hint" style="margin:0 0 10px;">Set the maximum patients and any special note for each clinic day in advance. Dates you leave at 30 with no note aren't stored. Later dates keep these presets until they appear in the 12-week view, and they also drive the "date is nearly full" warning when booking appointments.</p>
+    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
+      <label style="font-size:12.5px;">Set max patients for all dates:</label>
+      <input id="sp_default_max" type="number" min="1" step="1" value="30" style="width:80px; padding:6px 8px; border:1px solid var(--line); border-radius:7px;">
+      <button class="btn" style="padding:5px 12px; font-size:12px;" onclick="applyDefaultMaxToAll()">Apply to all</button>
+    </div>
+    <div id="sp_body" style="overflow:auto; flex:1; border:1px solid var(--line); border-radius:8px;"></div>
+    <div class="login-error" id="spError" style="margin-top:8px;"></div>
+    <div class="row-actions" style="margin-top:10px;">
+      <button class="btn" onclick="closeSessionPlanner()">Cancel</button>
+      <button class="btn btn-primary" id="spSaveBtn" onclick="saveSessionPlan()">Save plan</button>
     </div>
   </div>
 </div>
@@ -4919,6 +4937,7 @@ async function renderScheduleView(){
   main.innerHTML =
     '<div class="sched-header">'+
       '<h1 style="font-family:var(--serif);font-size:22px;margin:0;">Clinic Schedule <span style="font-size:13px;font-weight:400;color:var(--ink-soft);">— Next 12 Thursdays</span></h1>'+
+      (isAdmin ? '<button class="btn btn-primary" style="font-size:12.5px; padding:7px 14px;" onclick="openSessionPlanner()">📅 Plan next 6 months</button>' : '')+
       '<div class="sched-legend">'+
         '<span><span class="leg-dot" style="background:#C0392B;"></span> Full</span>'+
         '<span><span class="leg-dot" style="background:#F1C40F;"></span> ≥90% (warning)</span>'+
@@ -4943,12 +4962,84 @@ async function filterApptByDate(dateStr){
     '<h2 style="font-family:var(--serif);font-size:20px;margin:0;">Appointments — '+escapeHtml(dateStr)+'</h2></div>'+card+'</div>';
 }
 
+// ── Admin: preset max patients / notes for every Thursday in the next 6 months ──
+let _spDates = [], _spOriginal = {};
+async function openSessionPlanner(){
+  if(currentUserRole!=="admin"){ showToast("Admin access only.","error"); return; }
+  const {sessionConfigs, countByDate} = await getScheduleCounts();
+  const first = getNext12Thursdays()[0];
+  const end = new Date(); end.setHours(0,0,0,0); end.setMonth(end.getMonth()+6);
+  _spDates = []; _spOriginal = {};
+  let html = '<table class="ttr-table" style="margin:0; min-width:520px;"><thead><tr><th style="width:120px;">Date</th><th style="width:110px;">Max patients</th><th>Special note</th><th style="width:80px;">Booked</th></tr></thead><tbody>';
+  let lastMonth = "";
+  for(let d = new Date(first); d <= end; d.setDate(d.getDate()+7)){
+    const dateStr = localDateStr(d);
+    const monthLabel = d.toLocaleDateString('en-GB',{month:'long', year:'numeric'});
+    if(monthLabel !== lastMonth){
+      html += '<tr><td colspan="4" style="background:#F0EDE4; font-weight:700; font-size:12px; padding:6px 10px;">'+monthLabel+'</td></tr>';
+      lastMonth = monthLabel;
+    }
+    const cfg = sessionConfigs[dateStr];
+    const max = cfg ? (cfg.maxPatients||30) : 30;
+    const notes = cfg ? (cfg.notes||"") : "";
+    const booked = countByDate[dateStr]||0;
+    _spDates.push(dateStr);
+    _spOriginal[dateStr] = {exists:!!cfg, max, notes, noInrDay: cfg ? !!cfg.noInrDay : false};
+    const dd = String(d.getDate()).padStart(2,'0'), mm = String(d.getMonth()+1).padStart(2,'0');
+    html += '<tr>'+
+      '<td style="font-size:12.5px; white-space:nowrap;">'+dd+'/'+mm+'/'+d.getFullYear()+'</td>'+
+      '<td><input id="sp_max_'+dateStr+'" type="number" min="1" step="1" value="'+max+'" style="width:80px; padding:5px 7px; border:1px solid var(--line); border-radius:6px;"></td>'+
+      '<td><input id="sp_note_'+dateStr+'" type="text" value="'+escapeHtml(notes)+'" placeholder="e.g. Nephro Clinic, NO INR 1 day before" style="width:100%; padding:5px 7px; border:1px solid var(--line); border-radius:6px; font-size:12.5px;"></td>'+
+      '<td style="font-size:12px; color:var(--ink-soft);">'+booked+'</td>'+
+    '</tr>';
+  }
+  html += '</tbody></table>';
+  document.getElementById("sp_body").innerHTML = html;
+  document.getElementById("spError").innerText = "";
+  document.getElementById("sp_default_max").value = 30;
+  document.getElementById("sessionPlanModal").classList.add("show");
+}
+function closeSessionPlanner(){ document.getElementById("sessionPlanModal").classList.remove("show"); }
+function applyDefaultMaxToAll(){
+  const v = parseInt(document.getElementById("sp_default_max").value, 10);
+  if(isNaN(v) || v < 1){ document.getElementById("spError").innerText = "Enter a whole number of 1 or more."; return; }
+  document.getElementById("spError").innerText = "";
+  _spDates.forEach(ds=>{ const el = document.getElementById("sp_max_"+ds); if(el) el.value = v; });
+}
+async function saveSessionPlan(){
+  if(currentUserRole!=="admin"){ showToast("Admin access only.","error"); return; }
+  const errBox = document.getElementById("spError");
+  errBox.innerText = "";
+  const payload = [];
+  for(const ds of _spDates){
+    const max = parseInt(document.getElementById("sp_max_"+ds).value, 10);
+    if(isNaN(max) || max < 1){ errBox.innerText = "Max patients must be a whole number of 1 or more (check "+ds+")."; return; }
+    const notes = document.getElementById("sp_note_"+ds).value.trim();
+    const orig = _spOriginal[ds];
+    if(!orig.exists && max === 30 && notes === "") continue;       // still the default — nothing to store
+    if(orig.exists && max === orig.max && notes === orig.notes) continue; // unchanged
+    payload.push({session_date:ds, max_patients:max, notes, no_inr_day:orig.noInrDay});
+  }
+  if(!payload.length){ closeSessionPlanner(); showToast("No changes to save.","info",2500); return; }
+  const btn = document.getElementById("spSaveBtn");
+  btn.disabled = true; btn.innerText = "Saving…";
+  const {error} = await sb.from("clinic_sessions").upsert(payload, {onConflict:"session_date"});
+  btn.disabled = false; btn.innerText = "Save plan";
+  if(error){ errBox.innerText = "Could not save: "+error.message; return; }
+  writeAuditLog("clinic_sessions", "bulk", "SESSION_PLAN", {dates: payload.length, from: payload[0].session_date, to: payload[payload.length-1].session_date});
+  sessionConfigCache = null;
+  closeSessionPlanner();
+  showToast("Saved "+payload.length+" clinic day"+(payload.length>1?"s":"")+" ✓","success",3000);
+  renderScheduleView();
+}
+
 async function editSession(dateStr, maxPts, notes, noInrDay){
   const newMax = parseInt(prompt("Max patients for "+dateStr+":", maxPts)||maxPts);
   if(isNaN(newMax)||newMax<1) return;
   const newNotes = prompt("Special notes (e.g. 'Nephro Clinic', 'NO INR 1 day before'):", notes)||"";
   try{
-    await sb.from("clinic_sessions").upsert({session_date:dateStr, max_patients:newMax, notes:newNotes, no_inr_day:noInrDay});
+    const {error} = await sb.from("clinic_sessions").upsert({session_date:dateStr, max_patients:newMax, notes:newNotes, no_inr_day:noInrDay});
+    if(error){ showToast("Failed: "+error.message,"error"); return; }
     sessionConfigCache = null;
     showToast("Session updated ✓","success",2000);
     renderScheduleView();
@@ -5168,7 +5259,7 @@ const OFFLINE_BLOCKED_ACTIONS = [
   "saveProfile","deletePatient","saveReview","editReview","openExternalInrModal","saveExternalInr",
   "openRescheduleModal","saveReschedule","deleteReview","toggleActive","toggleTTRExclude","quickExcludeFromTTR",
   "saveDAction","resolveDAction","saveDoacNote","savePassoverNotes","togglePassoverEdit","addMedication",
-  "removeMedication","editSession","toggleUserRole","saveRulesClick","addTier","removeTier","promptChangeName","saveFullName"
+  "removeMedication","editSession","openSessionPlanner","saveSessionPlan","applyDefaultMaxToAll","toggleUserRole","saveRulesClick","addTier","removeTier","promptChangeName","saveFullName"
 ];
 function offlineBlocked(){
   showToast("Read-only offline view — changes are disabled.","error",3000);
